@@ -1,0 +1,3 @@
+syntax = "proto3";
+package hearth.v1;
+option go_package = "github.com/dayski-47/hearth/gateway/internal/hearth/v1;hearthv1";

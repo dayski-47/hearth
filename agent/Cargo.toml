@@ -1,0 +1,25 @@
+[package]
+name = "hearth-agent"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hearth-agent"
+path = "src/main.rs"
+
+[dependencies]
+hearth-proto = { path = "../crates/hearth-proto" }
+hearth-common = { path = "../crates/hearth-common" }
+tokio.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+bollard.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["test-util"] }

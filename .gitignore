@@ -1,0 +1,10 @@
+/truth/
+/gateway/internal/hearthv1/
+/gateway/internal/store/gen/
+/target/
+/web/node_modules/
+/web/dist/
+*.env
+!.env.example
+/deploy/certs/*.pem
+/deploy/certs/*.srl
