@@ -3,19 +3,28 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/config"
+	"github.com/dayski-47/hearth/gateway/internal/grpcserver"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
 	"github.com/dayski-47/hearth/gateway/internal/password"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
+	"github.com/dayski-47/hearth/gateway/internal/tlsutil"
+	"golang.org/x/sync/errgroup"
 )
+
+const agentTTL = 30 * time.Second
 
 func main() {
 	cmd := "serve"
@@ -61,7 +70,75 @@ func runServe() error {
 	}); err != nil {
 		return err
 	}
-	return httpapi.New(cfg, st, logger).Run(ctx)
+
+	reg := agentregistry.NewInMemory()
+	// Rebuild the liveness cache from the durable record on boot.
+	if agents, err := st.Queries().ListAgents(ctx); err == nil {
+		for _, a := range agents {
+			_ = reg.Register(ctx, a.ID, a.AdvertiseAddr, agentregistry.Capacity{})
+		}
+	} else {
+		logger.Warn("rebuild registry from db failed", "error", err)
+	}
+
+	persistence := storeAgentPersistence{st: st}
+	grpcTLS, err := tlsutil.ServerConfig(cfg.TLS.CA, cfg.TLS.Cert, cfg.TLS.Key)
+	if err != nil {
+		return err
+	}
+	gs := grpcserver.New(reg, persistence, grpcTLS, logger)
+	lis, err := net.Listen("tcp", cfg.GRPCListenAddr)
+	if err != nil {
+		return err
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return httpapi.New(cfg, st, logger, reg).Run(gctx) })
+	g.Go(func() error {
+		go func() { <-gctx.Done(); gs.GracefulStop() }()
+		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)
+		return gs.Serve(lis)
+	})
+	g.Go(func() error {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-gctx.Done():
+				return nil
+			case now := <-t.C:
+				for _, id := range reg.Sweep(gctx, now, agentTTL) {
+					if err := persistence.SetStatus(gctx, id, "lost"); err != nil {
+						logger.Warn("persist agent lost failed", "host_id", id, "error", err)
+					}
+					logger.Warn("agent lost", "host_id", id)
+				}
+			}
+		}
+	})
+	return g.Wait()
+}
+
+// storeAgentPersistence adapts *store.Store to grpcserver.AgentPersistence.
+type storeAgentPersistence struct{ st *store.Store }
+
+func (p storeAgentPersistence) UpsertAgent(ctx context.Context, id, advertiseAddr string, capacity agentregistry.Capacity) error {
+	raw, err := json.Marshal(capacity)
+	if err != nil {
+		return err
+	}
+	_, err = p.st.Queries().UpsertAgent(ctx, gen.UpsertAgentParams{
+		ID: id, AdvertiseAddr: advertiseAddr, Capacity: raw,
+	})
+	return err
+}
+
+func (p storeAgentPersistence) TouchHeartbeat(ctx context.Context, id string) error {
+	return p.st.Queries().TouchAgentHeartbeat(ctx, id)
+}
+
+func (p storeAgentPersistence) SetStatus(ctx context.Context, id, status string) error {
+	return p.st.Queries().SetAgentStatus(ctx, gen.SetAgentStatusParams{ID: id, Status: status})
 }
 
 func runHashPassword() error {

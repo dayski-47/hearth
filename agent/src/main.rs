@@ -17,6 +17,13 @@ async fn main() -> Result<()> {
     podman.ping().await?;
     tracing::info!(host_id = %cfg.host_id, "podman reachable");
 
+    let reg_cfg = cfg.clone();
+    tokio::spawn(async move {
+        if let Err(e) = hearth_agent::registration::run(reg_cfg).await {
+            tracing::error!(error = %e, "registration loop exited");
+        }
+    });
+
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };

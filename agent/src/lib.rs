@@ -1,6 +1,8 @@
 pub mod config;
 pub mod engine;
+pub mod gateway_client;
 pub mod grpc;
+pub mod registration;
 pub mod tls;
 
 #[cfg(test)]

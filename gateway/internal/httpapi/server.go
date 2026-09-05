@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -16,10 +17,13 @@ type Server struct {
 	cfg    *config.Config
 	st     *store.Store
 	logger *slog.Logger
+	// reg is the live agent registry. Unused by Phase 1 handlers; retained for
+	// workspace placement in Plan 2.
+	reg *agentregistry.Registry
 }
 
-func New(cfg *config.Config, st *store.Store, logger *slog.Logger) *Server {
-	return &Server{cfg: cfg, st: st, logger: logger}
+func New(cfg *config.Config, st *store.Store, logger *slog.Logger, reg *agentregistry.Registry) *Server {
+	return &Server{cfg: cfg, st: st, logger: logger, reg: reg}
 }
 
 func (s *Server) Handler() http.Handler {
