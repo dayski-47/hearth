@@ -1,6 +1,8 @@
 set shell := ["bash", "-uc"]
 
 build:
+    buf generate
+    cd gateway/internal/store && sqlc generate
     cd gateway && go build ./...
     cargo build
 
