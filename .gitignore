@@ -1,6 +1,7 @@
 /truth/
-/gateway/internal/hearthv1/
+/gateway/internal/hearth/
 /gateway/internal/store/gen/
+/gateway/hearth-gateway
 /target/
 /web/node_modules/
 /web/dist/

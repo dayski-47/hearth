@@ -1,0 +1,24 @@
+syntax = "proto3";
+package hearth.v1;
+
+option go_package = "github.com/dayski-47/hearth/gateway/internal/hearth/v1;hearthv1";
+
+import "hearth/v1/common.proto";
+
+service Agent {
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (Workspace);
+  rpc StartWorkspace(WorkspaceRef) returns (Workspace);
+  rpc StopWorkspace(WorkspaceRef) returns (Workspace);
+  rpc DestroyWorkspace(WorkspaceRef) returns (DestroyResponse);
+  rpc GetWorkspace(WorkspaceRef) returns (Workspace);
+}
+
+message CreateWorkspaceRequest {
+  string workspace_id = 1;
+  string image = 2;
+  ResourceLimits limits = 3;
+  string network = 4; // "egress" | "none"
+  string userns = 5;  // "keep-id" | "auto"
+}
+
+message DestroyResponse {}

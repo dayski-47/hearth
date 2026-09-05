@@ -1,0 +1,70 @@
+syntax = "proto3";
+package hearth.v1;
+
+option go_package = "github.com/dayski-47/hearth/gateway/internal/hearth/v1;hearthv1";
+
+service WorkspaceIo {
+  rpc OpenTerminal(stream TerminalClientFrame) returns (stream TerminalServerFrame);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
+  rpc WriteFile(stream WriteFileFrame) returns (WriteFileResponse);
+  rpc CreateNode(CreateNodeRequest) returns (Node);
+  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse);
+  rpc RenameNode(RenameNodeRequest) returns (Node);
+  rpc WatchChanges(WatchRequest) returns (stream FileEvent);
+}
+
+message TerminalInit {
+  string workspace_id = 1;
+  string shell = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+  string resume_session_id = 5;
+}
+message TerminalResize { uint32 cols = 1; uint32 rows = 2; }
+message TerminalClientFrame {
+  oneof msg {
+    TerminalInit init = 1;
+    bytes stdin = 2;
+    TerminalResize resize = 3;
+  }
+}
+message TerminalReady { string session_id = 1; }
+message TerminalExit { int32 exit_code = 1; string reason = 2; }
+message TerminalServerFrame {
+  oneof msg {
+    TerminalReady ready = 1;
+    bytes stdout = 2;
+    TerminalExit exit = 3;
+  }
+}
+
+message ListDirRequest { string workspace_id = 1; string path = 2; }
+message Node {
+  string path = 1;
+  string name = 2;
+  bool is_dir = 3;
+  uint64 size = 4;
+  int64 modified_unix = 5;
+}
+message ListDirResponse { repeated Node entries = 1; }
+message ReadFileRequest { string workspace_id = 1; string path = 2; }
+message FileChunk { bytes data = 1; }
+message WriteFileInit { string workspace_id = 1; string path = 2; }
+message WriteFileFrame {
+  oneof msg {
+    WriteFileInit init = 1;
+    bytes data = 2;
+  }
+}
+message WriteFileResponse { uint64 bytes_written = 1; }
+message CreateNodeRequest { string workspace_id = 1; string path = 2; bool is_dir = 3; }
+message DeleteNodeRequest { string workspace_id = 1; string path = 2; }
+message DeleteNodeResponse {}
+message RenameNodeRequest { string workspace_id = 1; string from = 2; string to = 3; }
+message WatchRequest { string workspace_id = 1; }
+message FileEvent {
+  string path = 1;
+  enum Kind { KIND_UNSPECIFIED = 0; CREATED = 1; MODIFIED = 2; REMOVED = 3; }
+  Kind kind = 2;
+}

@@ -1,3 +1,31 @@
 syntax = "proto3";
 package hearth.v1;
+
 option go_package = "github.com/dayski-47/hearth/gateway/internal/hearth/v1;hearthv1";
+
+enum WorkspaceState {
+  WORKSPACE_STATE_UNSPECIFIED = 0;
+  CREATING = 1;
+  RUNNING = 2;
+  STOPPED = 3;
+  ERROR = 4;
+}
+
+message ResourceLimits {
+  uint32 cpu_millis = 1;
+  uint64 memory_bytes = 2;
+  uint32 pids = 3;
+  uint64 disk_bytes = 4;
+}
+
+message Workspace {
+  string workspace_id = 1;
+  string container_id = 2;
+  WorkspaceState state = 3;
+  string host_id = 4;
+  string message = 5; // human-readable detail when state == ERROR
+}
+
+message WorkspaceRef {
+  string workspace_id = 1;
+}
