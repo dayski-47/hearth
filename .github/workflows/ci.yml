@@ -19,6 +19,7 @@ jobs:
       - run: go install github.com/bufbuild/buf/cmd/buf@v1.47.2
       - run: buf generate
       - run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 && (cd gateway/internal/store && sqlc generate)
+      - run: bash deploy/certs/gen-ca.sh
       - working-directory: gateway
         run: go vet ./... && test -z "$(gofmt -l .)" && go test ./...
         env:
