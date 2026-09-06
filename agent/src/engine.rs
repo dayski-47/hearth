@@ -66,10 +66,11 @@ pub fn workspace_host_config(spec: &WorkspaceContainerSpec) -> HostConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ContainerRunState {
     Running,
     Stopped,
+    #[default]
     Missing,
 }
 
