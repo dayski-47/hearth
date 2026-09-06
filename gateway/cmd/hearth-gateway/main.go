@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
+	"github.com/dayski-47/hearth/gateway/internal/auth"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/grpcserver"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
@@ -71,6 +72,13 @@ func runServe() error {
 		return err
 	}
 
+	authMgr := auth.NewManager(st.Queries(), cfg.SessionSecret, logger)
+	authH := auth.NewHandlers(authMgr, st.Queries(), authMgr, auth.Config{
+		AdminUser:    cfg.AdminUser,
+		AdminHash:    cfg.AdminPasswordHash,
+		SecureCookie: strings.HasPrefix(cfg.PublicURL, "https://"),
+	}, logger)
+
 	reg := agentregistry.NewInMemory()
 	// Rebuild the liveness cache from the durable record on boot, preserving the
 	// persisted status/heartbeat/capacity so a "lost" host is not silently
@@ -101,7 +109,7 @@ func runServe() error {
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, reg).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, reg, authH).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)
@@ -121,6 +129,23 @@ func runServe() error {
 					}
 					logger.Warn("agent lost", "host_id", id)
 				}
+			}
+		}
+	})
+	g.Go(func() error {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-gctx.Done():
+				return nil
+			case <-t.C:
+				if n, err := st.Queries().DeleteExpiredSessions(gctx); err != nil {
+					logger.Warn("prune expired sessions failed", "error", err)
+				} else if n > 0 {
+					logger.Info("pruned expired sessions", "count", n)
+				}
+				authH.PruneLimiter()
 			}
 		}
 	})
