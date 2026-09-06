@@ -157,6 +157,7 @@ func TestClientIP(t *testing.T) {
 		{"trusted peer with an empty last hop falls back", "10.1.2.3:5555", "1.2.3.4,   ", trusted, "10.1.2.3"},
 		{"malformed remote addr", "not-an-addr", "1.2.3.4", trusted, "not-an-addr"},
 		{"ipv6 trusted peer", "[::1]:5555", "9.9.9.9", []netip.Prefix{netip.MustParsePrefix("::1/128")}, "9.9.9.9"},
+		{"trusted peer with invalid forwarded ip falls back to socket peer", "10.1.2.3:5555", "not-an-ip", trusted, "10.1.2.3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,6 +220,34 @@ func TestLogoutClearsCookie(t *testing.T) {
 	c := rec.Result().Cookies()
 	if len(c) != 1 || c[0].MaxAge >= 0 {
 		t.Fatalf("cookie not cleared: %+v", c)
+	}
+}
+
+func TestLogoutWithMiddlewareOnlyClears(t *testing.T) {
+	f := newFakeQueries()
+	m := testManager(t, f)
+	cookie, _ := m.Create(context.Background(), f.user.ID, "ua", netip.Addr{})
+	sc := &fakeSessions{}
+	h := testHandlers(t, sc)
+	h.mgr = m
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
+	rec := httptest.NewRecorder()
+	logoutHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.Logout(w, r)
+	})
+	h.RequireSession()(logoutHandler).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("code=%d", rec.Code)
+	}
+	c := rec.Result().Cookies()
+	if len(c) != 1 {
+		t.Fatalf("want exactly one Set-Cookie, got %d: %+v", len(c), c)
+	}
+	if c[0].MaxAge >= 0 {
+		t.Fatalf("cookie should be cleared (MaxAge < 0), got %d", c[0].MaxAge)
 	}
 }
 

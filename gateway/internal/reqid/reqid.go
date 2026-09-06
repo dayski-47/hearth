@@ -15,7 +15,9 @@ const key ctxKey = 0
 // New returns a fresh random hex-16 request id.
 func New() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("reqid: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
 

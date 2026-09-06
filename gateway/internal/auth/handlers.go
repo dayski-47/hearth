@@ -101,8 +101,10 @@ func (h *Handlers) RequireSession() func(http.Handler) http.Handler {
 				return
 			}
 			// The session id is stable, so the same value is re-sent; only the
-			// expiry moves.
-			http.SetCookie(w, h.cookie(c.Value, int(sessionTTL.Seconds())))
+			// expiry moves. Skip re-issue on logout — it will clear the cookie.
+			if !strings.HasSuffix(r.URL.Path, "/auth/logout") {
+				http.SetCookie(w, h.cookie(c.Value, int(sessionTTL.Seconds())))
+			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
 		})
 	}
@@ -117,6 +119,7 @@ type loginRequest struct {
 
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r, h.cfg.TrustedProxies)
+	// NOTE: a 503 from the verify cap still spends a rate-limit token; acceptable — the alternative lets an attacker probe cap state for free.
 	if !h.limiter.allow(ip) {
 		writeError(w, http.StatusTooManyRequests, "rate limited")
 		return
@@ -225,6 +228,10 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 		xff = xff[i+1:]
 	}
 	if v := strings.TrimSpace(xff); v != "" {
+		// NOTE: with a chain of trusted proxies this is the innermost proxy, so clients behind it share one limiter key (over-limiting, never bypass).
+		if _, err := netip.ParseAddr(v); err != nil {
+			return host // the socket peer; a garbled forwarded hop is not a key
+		}
 		return v
 	}
 	return host
