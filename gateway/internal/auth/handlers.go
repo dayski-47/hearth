@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,10 +30,20 @@ type UserLookup interface {
 	GetUserByUsername(ctx context.Context, username string) (gen.User, error)
 }
 
+// maxVerifyInFlight caps concurrent argon2id verifications. Each one costs
+// 64 MiB, so an unauthenticated flood would otherwise exhaust the gateway's
+// memory before any rate limit could matter.
+const maxVerifyInFlight = 4
+
+// verifyWait is how long a login waits for a verify slot before shedding load.
+const verifyWait = 2 * time.Second
+
 type Config struct {
 	AdminUser    string
 	AdminHash    string
 	SecureCookie bool
+	// TrustedProxies are the peers whose X-Forwarded-For header is believed.
+	TrustedProxies []netip.Prefix
 }
 
 type Handlers struct {
@@ -43,6 +54,10 @@ type Handlers struct {
 	cfg       Config
 	limiter   *loginLimiter
 	decoyHash string
+	// verifySem bounds concurrent argon2 work; verifyWait is how long a request
+	// waits for a slot. Both are constants outside tests.
+	verifySem  chan struct{}
+	verifyWait time.Duration
 }
 
 // NewHandlers wires the auth endpoints. mgr may be nil in unit tests that do
@@ -52,17 +67,45 @@ func NewHandlers(sc SessionCreator, users UserLookup, mgr *Manager, cfg Config, 
 	// username still runs one argon2 verify and takes the same time as a real
 	// one.
 	rb := make([]byte, 16)
-	_, _ = rand.Read(rb)
-	decoy, _ := password.Hash(hex.EncodeToString(rb))
+	if _, err := rand.Read(rb); err != nil {
+		panic("auth: read random bytes for the decoy hash: " + err.Error())
+	}
+	decoy, err := password.Hash(hex.EncodeToString(rb))
+	if err != nil {
+		panic("auth: build the decoy hash: " + err.Error())
+	}
 	return &Handlers{
 		sc: sc, users: users, mgr: mgr, logger: logger, cfg: cfg,
-		limiter:   newLoginLimiter(5, time.Minute),
-		decoyHash: decoy,
+		limiter:    newLoginLimiter(5, time.Minute),
+		decoyHash:  decoy,
+		verifySem:  make(chan struct{}, maxVerifyInFlight),
+		verifyWait: verifyWait,
 	}
 }
 
+// RequireSession authenticates the session cookie, attaches the user to the
+// request context, and re-issues the cookie with a fresh Max-Age. The session
+// row slides server-side on every request, so without this the browser would
+// drop the cookie a fixed sessionTTL after login however active the user was.
 func (h *Handlers) RequireSession() func(http.Handler) http.Handler {
-	return RequireSession(h.mgr, h.logger)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c, err := r.Cookie(cookieName)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			u, err := h.mgr.Authenticate(r.Context(), c.Value)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			// The session id is stable, so the same value is re-sent; only the
+			// expiry moves.
+			http.SetCookie(w, h.cookie(c.Value, int(sessionTTL.Seconds())))
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+		})
+	}
 }
 
 func (h *Handlers) PruneLimiter() { h.limiter.prune() }
@@ -73,7 +116,7 @@ type loginRequest struct {
 }
 
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := clientIP(r, h.cfg.TrustedProxies)
 	if !h.limiter.allow(ip) {
 		writeError(w, http.StatusTooManyRequests, "rate limited")
 		return
@@ -88,7 +131,23 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	if req.Username != h.cfg.AdminUser {
 		hash = h.decoyHash
 	}
-	ok, _ := password.Verify(hash, req.Password)
+	select {
+	case h.verifySem <- struct{}{}:
+	case <-time.After(h.verifyWait):
+		h.logger.WarnContext(r.Context(), "login: verify capacity exhausted", "client_ip", ip)
+		writeError(w, http.StatusServiceUnavailable, "busy")
+		return
+	}
+	ok, err := func() (bool, error) {
+		defer func() { <-h.verifySem }()
+		return password.Verify(hash, req.Password)
+	}()
+	if err != nil {
+		// Startup validates the configured hash, so this only fires for the
+		// decoy or a hash changed underneath a running gateway. Either way it
+		// would otherwise be an unexplained wall of 401s.
+		h.logger.ErrorContext(r.Context(), "login: password verify error", "error", err)
+	}
 	if !ok || req.Username != h.cfg.AdminUser {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -139,18 +198,34 @@ func (h *Handlers) cookie(value string, maxAge int) *http.Cookie {
 	}
 }
 
-// clientIP prefers the first X-Forwarded-For hop (the gateway sits behind the
-// Caddy reverse proxy from deploy/) and falls back to the socket address.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first, _, ok := strings.Cut(xff, ","); ok {
-			return strings.TrimSpace(first)
-		}
-		return strings.TrimSpace(xff)
-	}
+// clientIP identifies the caller for rate limiting and session records.
+//
+// X-Forwarded-For is only believed when the socket peer is one of the
+// configured trusted proxies, and then only its rightmost entry — the hop that
+// proxy itself observed. Everything to the left is supplied by the client and
+// would otherwise let one attacker mint a fresh limiter key per request.
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(trusted) == 0 {
+		return host
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	peer = peer.Unmap().WithZone("")
+	if !slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(peer) }) {
+		return host
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if i := strings.LastIndexByte(xff, ','); i >= 0 {
+		xff = xff[i+1:]
+	}
+	if v := strings.TrimSpace(xff); v != "" {
+		return v
 	}
 	return host
 }

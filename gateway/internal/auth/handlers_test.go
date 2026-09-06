@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayski-47/hearth/gateway/internal/password"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
@@ -114,6 +116,93 @@ func TestLoginRateLimited(t *testing.T) {
 	h.Login(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("got %d, want 429", rec.Code)
+	}
+}
+
+// A spoofed X-Forwarded-For must not mint a fresh limiter key per request when
+// the peer is not a trusted proxy: that is the login rate limit bypass.
+func TestLoginIgnoresUntrustedForwardedFor(t *testing.T) {
+	h := testHandlers(t, &fakeSessions{value: "x"})
+	var last int
+	for i := 0; i < 20; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = "203.0.113.7:5555"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.9.%d.%d", i, i))
+		h.Login(rec, req)
+		last = rec.Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("last of 20 spoofed-XFF attempts got %d, want 429", last)
+	}
+	if len(h.limiter.hits) != 1 {
+		t.Fatalf("limiter tracked %d keys, want 1 (the peer address)", len(h.limiter.hits))
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("192.168.1.5/32")}
+	cases := []struct {
+		name    string
+		remote  string
+		xff     string
+		trusted []netip.Prefix
+		want    string
+	}{
+		{"no trusted proxies ignores xff", "203.0.113.7:5555", "1.2.3.4", nil, "203.0.113.7"},
+		{"untrusted peer ignores xff", "203.0.113.7:5555", "1.2.3.4", trusted, "203.0.113.7"},
+		{"trusted peer takes the rightmost hop", "10.1.2.3:5555", "1.2.3.4, 5.6.7.8", trusted, "5.6.7.8"},
+		{"trusted peer with a single hop", "192.168.1.5:5555", "  5.6.7.8  ", trusted, "5.6.7.8"},
+		{"trusted peer without xff falls back", "10.1.2.3:5555", "", trusted, "10.1.2.3"},
+		{"trusted peer with an empty last hop falls back", "10.1.2.3:5555", "1.2.3.4,   ", trusted, "10.1.2.3"},
+		{"malformed remote addr", "not-an-addr", "1.2.3.4", trusted, "not-an-addr"},
+		{"ipv6 trusted peer", "[::1]:5555", "9.9.9.9", []netip.Prefix{netip.MustParsePrefix("::1/128")}, "9.9.9.9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+			req.RemoteAddr = tc.remote
+			if tc.xff != "" {
+				req.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if got := clientIP(req, tc.trusted); got != tc.want {
+				t.Fatalf("clientIP = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// With every verify slot held, a further login sheds load instead of queueing
+// another 64 MiB argon2 allocation.
+func TestLoginShedsLoadWhenVerifySlotsAreFull(t *testing.T) {
+	h := testHandlers(t, &fakeSessions{value: "x"})
+	h.verifyWait = 10 * time.Millisecond
+	if cap(h.verifySem) != maxVerifyInFlight {
+		t.Fatalf("semaphore cap = %d, want %d", cap(h.verifySem), maxVerifyInFlight)
+	}
+	for i := 0; i < maxVerifyInFlight; i++ {
+		h.verifySem <- struct{}{}
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "10.0.0.9:1"
+	h.Login(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503 when all verify slots are held", rec.Code)
+	}
+}
+
+// A completed login must hand its verify slot back.
+func TestLoginReleasesVerifySlot(t *testing.T) {
+	h := testHandlers(t, &fakeSessions{value: "x"})
+	for _, pw := range []string{"wrong", "correct-horse"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"`+pw+`"}`))
+		req.RemoteAddr = "10.0.0.9:1"
+		h.Login(rec, req)
+		if len(h.verifySem) != 0 {
+			t.Fatalf("slot still held after a %q login", pw)
+		}
 	}
 }
 

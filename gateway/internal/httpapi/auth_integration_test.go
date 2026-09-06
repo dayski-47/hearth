@@ -76,14 +76,20 @@ func TestAuthEndToEnd(t *testing.T) {
 	srv, _ := newTestServer(t)
 	c := srv.Client()
 
+	// login without the CSRF header -> 403, before any credential is checked
+	resp := post(t, c, srv.URL+"/api/auth/login", `{"username":"admin","password":"correct-horse"}`, "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("login without csrf: %d", resp.StatusCode)
+	}
+
 	// wrong password -> 401
-	resp := post(t, c, srv.URL+"/api/auth/login", `{"username":"admin","password":"nope"}`, "")
+	resp = post(t, c, srv.URL+"/api/auth/login", `{"username":"admin","password":"nope"}`, "1")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("bad login: %d", resp.StatusCode)
 	}
 
 	// correct -> 200 + cookie
-	resp = post(t, c, srv.URL+"/api/auth/login", `{"username":"admin","password":"correct-horse"}`, "")
+	resp = post(t, c, srv.URL+"/api/auth/login", `{"username":"admin","password":"correct-horse"}`, "1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("good login: %d", resp.StatusCode)
 	}
@@ -102,6 +108,13 @@ func TestAuthEndToEnd(t *testing.T) {
 	r, _ := c.Do(req)
 	if r.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("me unauthenticated: %d", r.StatusCode)
+	}
+
+	// any other /api path is guarded too: unauthenticated gets 401, not 404
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/api/not-a-route-yet", nil)
+	r, _ = c.Do(req)
+	if r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("/api is not deny-by-default: %d", r.StatusCode)
 	}
 
 	// me with cookie -> 200

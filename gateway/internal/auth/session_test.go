@@ -20,6 +20,8 @@ type fakeQueries struct {
 	slid      int
 	deleted   []string
 	createErr error
+	// now stamps last_seen_at on insert, mirroring the column default.
+	now func() time.Time
 }
 
 func newFakeQueries() *fakeQueries {
@@ -27,6 +29,7 @@ func newFakeQueries() *fakeQueries {
 	return &fakeQueries{
 		sessions: map[string]gen.Session{},
 		user:     gen.User{ID: uid, Username: "admin", PasswordHash: "x"},
+		now:      time.Now,
 	}
 }
 
@@ -34,7 +37,10 @@ func (f *fakeQueries) CreateSession(_ context.Context, a gen.CreateSessionParams
 	if f.createErr != nil {
 		return gen.Session{}, f.createErr
 	}
-	s := gen.Session{ID: a.ID, UserID: a.UserID, ExpiresAt: a.ExpiresAt, UserAgent: a.UserAgent}
+	s := gen.Session{
+		ID: a.ID, UserID: a.UserID, ExpiresAt: a.ExpiresAt, UserAgent: a.UserAgent,
+		LastSeenAt: pgtype.Timestamptz{Time: f.now(), Valid: true},
+	}
 	f.sessions[a.ID] = s
 	return s, nil
 }
@@ -80,8 +86,62 @@ func TestManagerCreateAndAuthenticate(t *testing.T) {
 	if err != nil || u.Username != "admin" {
 		t.Fatalf("authenticate: u=%v err=%v", u, err)
 	}
+	// The row was just written, so it is already current and costs no UPDATE.
+	if f.slid != 0 {
+		t.Fatalf("a fresh session should not slide, got %d writes", f.slid)
+	}
+}
+
+func TestAuthenticateSlidesOnlyWhenStale(t *testing.T) {
+	f := newFakeQueries()
+	m := testManager(t, f)
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	f.now = func() time.Time { return start }
+	m.now = func() time.Time { return start }
+	ctx := context.Background()
+
+	cookie, err := m.Create(ctx, f.user.ID, "ua", netip.Addr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Well inside the threshold: no write.
+	m.now = func() time.Time { return start.Add(slideThreshold - time.Minute) }
+	if _, err := m.Authenticate(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	if f.slid != 0 {
+		t.Fatalf("expected no slide inside the threshold, got %d", f.slid)
+	}
+
+	// Past it: exactly one write.
+	m.now = func() time.Time { return start.Add(slideThreshold + time.Minute) }
+	if _, err := m.Authenticate(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
 	if f.slid != 1 {
-		t.Fatalf("expected the session to slide once, got %d", f.slid)
+		t.Fatalf("expected one slide past the threshold, got %d", f.slid)
+	}
+}
+
+// A row with no last_seen_at is treated as stale so the column gets populated.
+func TestAuthenticateSlidesWhenLastSeenUnset(t *testing.T) {
+	f := newFakeQueries()
+	m := testManager(t, f)
+	ctx := context.Background()
+	cookie, err := m.Create(ctx, f.user.ID, "ua", netip.Addr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, s := range f.sessions {
+		s.LastSeenAt = pgtype.Timestamptz{}
+		f.sessions[id] = s
+	}
+	if _, err := m.Authenticate(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	if f.slid != 1 {
+		t.Fatalf("expected a slide for an unset last_seen_at, got %d", f.slid)
 	}
 }
 

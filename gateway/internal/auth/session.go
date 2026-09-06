@@ -18,6 +18,12 @@ import (
 // after this long.
 const sessionTTL = 7 * 24 * time.Hour
 
+// slideThreshold is how stale a session row must be before Authenticate spends
+// a write on it. The cookie's expiry is refreshed on every request regardless,
+// so this only coarsens last_seen_at — which is a record, not a security
+// control — and keeps a busy tab from issuing an UPDATE per request.
+const slideThreshold = 24 * time.Hour
+
 // ErrNoSession is returned by Authenticate for every failure mode: no cookie,
 // bad signature, unknown id, or expired. The caller only needs "not logged in".
 var ErrNoSession = errors.New("auth: no valid session")
@@ -89,11 +95,13 @@ func (m *Manager) Authenticate(ctx context.Context, cookieValue string) (*gen.Us
 		}
 		return nil, ErrNoSession
 	}
-	if err := m.q.SlideSession(ctx, gen.SlideSessionParams{
-		ID:        id,
-		ExpiresAt: pgtype.Timestamptz{Time: m.now().Add(sessionTTL), Valid: true},
-	}); err != nil {
-		m.logger.WarnContext(ctx, "slide session failed", "error", err)
+	if seen := row.Session.LastSeenAt; !seen.Valid || m.now().Sub(seen.Time) >= slideThreshold {
+		if err := m.q.SlideSession(ctx, gen.SlideSessionParams{
+			ID:        id,
+			ExpiresAt: pgtype.Timestamptz{Time: m.now().Add(sessionTTL), Valid: true},
+		}); err != nil {
+			m.logger.WarnContext(ctx, "slide session failed", "error", err)
+		}
 	}
 	u := row.User
 	return &u, nil

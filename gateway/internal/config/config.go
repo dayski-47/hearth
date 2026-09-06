@@ -3,10 +3,13 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dayski-47/hearth/gateway/internal/password"
 )
 
 type TLSPaths struct {
@@ -36,8 +39,12 @@ type Config struct {
 	DatabaseURL       string
 	GRPCListenAddr    string
 	HostID            string
-	TLS               TLSPaths
-	Workspace         WorkspaceDefaults
+	// TrustedProxies are the peers whose X-Forwarded-For header may be
+	// believed. Empty means the gateway is reached directly and the header is
+	// ignored entirely.
+	TrustedProxies []netip.Prefix
+	TLS            TLSPaths
+	Workspace      WorkspaceDefaults
 }
 
 func Load() (*Config, error) {
@@ -62,6 +69,17 @@ func Load() (*Config, error) {
 		m.add("HEARTH_SESSION_SECRET must be at least 32 bytes")
 	}
 	c.SessionSecret = []byte(secret)
+
+	// A hash the verifier cannot parse would silently reject every login, so
+	// reject it at startup instead. Verifying the empty password against a
+	// well-formed hash returns (false, nil); only a malformed one errors.
+	if c.AdminPasswordHash != "" {
+		if _, err := password.Verify(c.AdminPasswordHash, ""); err != nil {
+			m.add("HEARTH_ADMIN_PASSWORD_HASH: " + err.Error())
+		}
+	}
+
+	c.TrustedProxies = prefixList(m, "HEARTH_TRUSTED_PROXIES")
 
 	c.Workspace = WorkspaceDefaults{
 		Image:       reqDefault("HEARTH_WORKSPACE_IMAGE", "ghcr.io/dayski-47/hearth-workspace-base:latest"),
@@ -111,6 +129,34 @@ func intDefault(m *multiErr, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// prefixList parses a comma-separated list of IP addresses and/or CIDRs. A bare
+// address becomes a single-host prefix. An unset value yields no prefixes.
+func prefixList(m *multiErr, key string) []netip.Prefix {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if p, err := netip.ParsePrefix(part); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(part)
+		if err != nil {
+			m.add(key + ": " + part + " is not an IP address or CIDR")
+			continue
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out
 }
 
 type multiErr struct{ msgs []string }

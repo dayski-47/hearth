@@ -19,6 +19,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/grpcserver"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
 	"github.com/dayski-47/hearth/gateway/internal/password"
+	"github.com/dayski-47/hearth/gateway/internal/reqid"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/dayski-47/hearth/gateway/internal/tlsutil"
@@ -53,7 +54,7 @@ func runServe() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(reqid.Handler(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -74,9 +75,10 @@ func runServe() error {
 
 	authMgr := auth.NewManager(st.Queries(), cfg.SessionSecret, logger)
 	authH := auth.NewHandlers(authMgr, st.Queries(), authMgr, auth.Config{
-		AdminUser:    cfg.AdminUser,
-		AdminHash:    cfg.AdminPasswordHash,
-		SecureCookie: strings.HasPrefix(cfg.PublicURL, "https://"),
+		AdminUser:      cfg.AdminUser,
+		AdminHash:      cfg.AdminPasswordHash,
+		SecureCookie:   strings.HasPrefix(cfg.PublicURL, "https://"),
+		TrustedProxies: cfg.TrustedProxies,
 	}, logger)
 
 	reg := agentregistry.NewInMemory()

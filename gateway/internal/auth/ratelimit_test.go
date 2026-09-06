@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -39,6 +40,43 @@ func TestLimiterKeysAreIndependent(t *testing.T) {
 	}
 	if l.allow("a") {
 		t.Fatal("key a is over budget")
+	}
+}
+
+func TestLimiterCapsTrackedKeys(t *testing.T) {
+	l := newLoginLimiter(5, time.Minute)
+	l.maxKeys = 16
+	now := time.Unix(0, 0)
+	l.now = func() time.Time { return now }
+	for i := 0; i < 500; i++ {
+		// Every key is fresh and in-window, so nothing expires on its own.
+		l.allow(fmt.Sprintf("key-%d", i))
+		now = now.Add(time.Millisecond)
+		if len(l.hits) > l.maxKeys {
+			t.Fatalf("limiter grew to %d keys, cap is %d", len(l.hits), l.maxKeys)
+		}
+	}
+	if len(l.hits) != l.maxKeys {
+		t.Fatalf("expected the limiter to sit at its cap, got %d", len(l.hits))
+	}
+}
+
+// Eviction must prefer expired windows over live ones.
+func TestLimiterEvictsExpiredBeforeLive(t *testing.T) {
+	l := newLoginLimiter(5, time.Minute)
+	l.maxKeys = 2
+	now := time.Unix(0, 0)
+	l.now = func() time.Time { return now }
+	l.allow("stale")
+	now = now.Add(30 * time.Second)
+	l.allow("live")
+	now = now.Add(31 * time.Second) // stale is past its window, live is not
+	l.allow("new")
+	if _, ok := l.hits["stale"]; ok {
+		t.Fatal("the expired window should have been evicted")
+	}
+	if _, ok := l.hits["live"]; !ok {
+		t.Fatal("a live window was evicted while an expired one remained")
 	}
 }
 

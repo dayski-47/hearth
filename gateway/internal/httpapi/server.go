@@ -35,14 +35,19 @@ func (s *Server) Handler() http.Handler {
 	r.Use(Recover(s.logger))
 	r.Get("/healthz", HealthHandler(s.st))
 
+	// Login is the one route under /api that cannot require a session. It sits
+	// outside the subtree below so that subtree can be authenticated as a
+	// whole, and it still takes the CSRF header: it is state-changing and sets
+	// a cookie.
+	r.With(auth.RequireCSRFHeader).Post("/api/auth/login", s.auth.Login)
+
+	// Everything under /api is authenticated by default. A new route added here
+	// is guarded unless it is deliberately registered as a sibling above.
 	r.Route("/api", func(r chi.Router) {
-		r.Post("/auth/login", s.auth.Login)
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireCSRFHeader)
-			r.Use(s.auth.RequireSession())
-			r.Post("/auth/logout", s.auth.Logout)
-			r.Get("/auth/me", s.auth.Me)
-		})
+		r.Use(auth.RequireCSRFHeader)
+		r.Use(s.auth.RequireSession())
+		r.Post("/auth/logout", s.auth.Logout)
+		r.Get("/auth/me", s.auth.Me)
 	})
 	return r
 }
