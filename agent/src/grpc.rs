@@ -86,7 +86,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{ContainerEngine, ContainerRunState, ContainerSpec};
+    use crate::engine::{ContainerEngine, ContainerRunState, WorkspaceContainerSpec};
 
     struct FakeEngine;
 
@@ -95,7 +95,19 @@ mod tests {
         async fn ping(&self) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn create_container(&self, _s: ContainerSpec) -> anyhow::Result<String> {
+        async fn ensure_image(&self, _image: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn ensure_network(&self, _name: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn create_volume(&self, _name: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn remove_volume(&self, _name: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn create_container(&self, _s: WorkspaceContainerSpec) -> anyhow::Result<String> {
             Ok("c1".into())
         }
         async fn start(&self, _id: &str) -> anyhow::Result<()> {

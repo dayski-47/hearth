@@ -6,7 +6,9 @@
 //! `/run/user/1001/podman/podman.sock`); otherwise the bollard socket defaults
 //! are used.
 
-use hearth_agent::engine::{ContainerEngine, ContainerRunState, ContainerSpec, PodmanEngine};
+use hearth_agent::engine::{
+    ContainerEngine, ContainerRunState, NetworkMode, PodmanEngine, WorkspaceContainerSpec,
+};
 
 #[tokio::test]
 async fn create_start_inspect_remove_busybox() {
@@ -22,10 +24,19 @@ async fn create_start_inspect_remove_busybox() {
     engine.ping().await.expect("podman ping");
 
     let name = format!("hearth-smoke-{}", std::process::id());
-    let spec = ContainerSpec {
+    let volume = format!("hearth-smoke-vol-{}", std::process::id());
+
+    engine.create_volume(&volume).await.expect("create volume");
+
+    let spec = WorkspaceContainerSpec {
         name: name.clone(),
         image: "docker.io/library/busybox:latest".into(),
-        cmd: vec!["sleep".into(), "30".into()],
+        volume: volume.clone(),
+        network: NetworkMode::None,
+        userns: "auto".into(),
+        cpu_millis: 1000,
+        memory_bytes: 1 << 30,
+        pids: 128,
     };
 
     let id = engine
@@ -49,4 +60,11 @@ async fn create_start_inspect_remove_busybox() {
         .expect("inspect after remove");
     eprintln!("state after remove: {state:?}");
     assert_eq!(state, ContainerRunState::Missing);
+
+    engine.remove_volume(&volume).await.expect("remove volume");
+    // Removing an already-gone volume is a no-op success.
+    engine
+        .remove_volume(&volume)
+        .await
+        .expect("remove missing volume is success");
 }

@@ -23,6 +23,7 @@ bollard.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+futures-util = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1.40", features = ["test-util"] }
