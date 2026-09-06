@@ -66,10 +66,10 @@ func Load() (*Config, error) {
 	c.Workspace = WorkspaceDefaults{
 		Image:       reqDefault("HEARTH_WORKSPACE_IMAGE", "ghcr.io/dayski-47/hearth-workspace-base:latest"),
 		Network:     reqDefault("HEARTH_WORKSPACE_NETWORK", "egress"),
-		CPUMillis:   uint32(intDefault("HEARTH_WORKSPACE_CPU", 2000)),
-		MemoryBytes: uint64(intDefault("HEARTH_WORKSPACE_MEMORY", 2<<30)),
-		Pids:        uint32(intDefault("HEARTH_WORKSPACE_PIDS", 512)),
-		DiskBytes:   uint64(intDefault("HEARTH_WORKSPACE_DISK", 5<<30)),
+		CPUMillis:   uint32(intDefault(m, "HEARTH_WORKSPACE_CPU", 2000)),
+		MemoryBytes: uint64(intDefault(m, "HEARTH_WORKSPACE_MEMORY", 2<<30)),
+		Pids:        uint32(intDefault(m, "HEARTH_WORKSPACE_PIDS", 512)),
+		DiskBytes:   uint64(intDefault(m, "HEARTH_WORKSPACE_DISK", 5<<30)),
 		UserNS:      reqDefault("HEARTH_USERNS", "keep-id"),
 	}
 	d, err := time.ParseDuration(reqDefault("HEARTH_WORKSPACE_IDLE_TIMEOUT", "30m"))
@@ -100,13 +100,17 @@ func reqDefault(key, def string) string {
 	}
 	return def
 }
-func intDefault(key string, def int) int {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
+func intDefault(m *multiErr, key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
 	}
-	return def
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		m.add(key + ": " + err.Error())
+		return def
+	}
+	return n
 }
 
 type multiErr struct{ msgs []string }

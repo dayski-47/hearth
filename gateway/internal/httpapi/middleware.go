@@ -1,39 +1,30 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
+
+	"github.com/dayski-47/hearth/gateway/internal/reqid"
 )
 
-type ctxKey int
-
-const requestIDKey ctxKey = 0
-
-func newRequestID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
+// RequestIDFromContext returns the request id carried by ctx, or "".
 func RequestIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		return v
-	}
-	return ""
+	return reqid.FromContext(ctx)
 }
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
 		if id == "" {
-			id = newRequestID()
+			id = reqid.New()
 		}
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey, id)))
+		next.ServeHTTP(w, r.WithContext(reqid.WithID(r.Context(), id)))
 	})
 }
 
@@ -74,4 +65,21 @@ type statusWriter struct {
 func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards to the underlying ResponseWriter so that connection-upgrade
+// routes (e.g. WebSocket) mounted under AccessLog keep working.
+func (s *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("statusWriter: underlying ResponseWriter is not a http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// Flush forwards to the underlying ResponseWriter when it supports flushing.
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

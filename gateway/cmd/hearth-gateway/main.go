@@ -62,7 +62,7 @@ func runServe() error {
 		return err
 	}
 	defer st.Close()
-	if err := st.Migrate(ctx); err != nil {
+	if err := st.Migrate(ctx, logger); err != nil {
 		return err
 	}
 	if _, err := st.Queries().UpsertUser(ctx, gen.UpsertUserParams{
@@ -72,10 +72,18 @@ func runServe() error {
 	}
 
 	reg := agentregistry.NewInMemory()
-	// Rebuild the liveness cache from the durable record on boot.
+	// Rebuild the liveness cache from the durable record on boot, preserving the
+	// persisted status/heartbeat/capacity so a "lost" host is not silently
+	// revived to "ready" (and Pick-able) by a gateway restart.
 	if agents, err := st.Queries().ListAgents(ctx); err == nil {
 		for _, a := range agents {
-			_ = reg.Register(ctx, a.ID, a.AdvertiseAddr, agentregistry.Capacity{})
+			var capacity agentregistry.Capacity
+			if len(a.Capacity) > 0 {
+				if err := json.Unmarshal(a.Capacity, &capacity); err != nil {
+					logger.Warn("decode persisted agent capacity failed", "host_id", a.ID, "error", err)
+				}
+			}
+			reg.Restore(a.ID, a.AdvertiseAddr, a.Status, capacity, a.LastHeartbeatAt.Time)
 		}
 	} else {
 		logger.Warn("rebuild registry from db failed", "error", err)

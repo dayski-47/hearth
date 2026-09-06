@@ -31,7 +31,16 @@ type Registry struct {
 }
 
 func NewInMemory() *Registry {
-	return &Registry{agents: map[string]*Agent{}, now: time.Now}
+	return NewInMemoryWithClock(time.Now)
+}
+
+// NewInMemoryWithClock is NewInMemory with an injectable clock, for tests that
+// need to drive liveness transitions deterministically.
+func NewInMemoryWithClock(now func() time.Time) *Registry {
+	if now == nil {
+		now = time.Now
+	}
+	return &Registry{agents: map[string]*Agent{}, now: now}
 }
 
 func (r *Registry) Register(_ context.Context, id, addr string, capacity Capacity) error {
@@ -42,6 +51,19 @@ func (r *Registry) Register(_ context.Context, id, addr string, capacity Capacit
 		Status: "ready", LastHeartbeat: r.now(),
 	}
 	return nil
+}
+
+// Restore inserts an agent with the given status and heartbeat timestamp,
+// without the "ready"/now() override that Register applies. The boot rebuild
+// uses it so a host persisted as "lost" stays lost (and un-Pick-able) until it
+// actually heartbeats again.
+func (r *Registry) Restore(id, addr, status string, capacity Capacity, lastHeartbeat time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.agents[id] = &Agent{
+		ID: id, AdvertiseAddr: addr, Capacity: capacity,
+		Status: status, LastHeartbeat: lastHeartbeat,
+	}
 }
 
 func (r *Registry) Heartbeat(_ context.Context, id string) error {

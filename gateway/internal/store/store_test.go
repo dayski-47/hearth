@@ -40,7 +40,7 @@ func newStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Close)
-	if err := s.Migrate(ctx); err != nil {
+	if err := s.Migrate(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	return s

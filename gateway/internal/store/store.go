@@ -5,6 +5,8 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
+	"log/slog"
 
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,8 +36,34 @@ func (s *Store) Close()                { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-func (s *Store) Migrate(ctx context.Context) error {
+// gooseSlogLogger adapts goose's Logger interface onto a *slog.Logger so that
+// migration progress is emitted as structured JSON like the rest of the gateway,
+// rather than goose's default plaintext lines on stdout.
+type gooseSlogLogger struct{ l *slog.Logger }
+
+func (g gooseSlogLogger) Printf(format string, v ...any) {
+	g.l.Info(trimNewline(fmt.Sprintf(format, v...)), "source", "goose")
+}
+
+func (g gooseSlogLogger) Fatalf(format string, v ...any) {
+	msg := trimNewline(fmt.Sprintf(format, v...))
+	g.l.Error(msg, "source", "goose")
+	panic("goose: " + msg)
+}
+
+func trimNewline(s string) string {
+	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func (s *Store) Migrate(ctx context.Context, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	goose.SetBaseFS(migrationsFS)
+	goose.SetLogger(gooseSlogLogger{l: logger})
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}

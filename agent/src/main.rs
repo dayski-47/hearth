@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     let reg_cfg = cfg.clone();
     tokio::spawn(async move {
         if let Err(e) = hearth_agent::registration::run(reg_cfg).await {
-            tracing::error!(error = %e, "registration loop exited");
+            tracing::error!(error = format!("{e:#}"), "registration loop exited");
         }
     });
 

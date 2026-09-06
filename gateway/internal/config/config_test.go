@@ -51,6 +51,15 @@ func TestLoadMissingRequired(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsNonNumericInt(t *testing.T) {
+	env := validEnv()
+	env["HEARTH_WORKSPACE_PIDS"] = "lots"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for non-numeric HEARTH_WORKSPACE_PIDS")
+	}
+}
+
 func TestLoadShortSecret(t *testing.T) {
 	env := validEnv()
 	env["HEARTH_SESSION_SECRET"] = "tooshort"

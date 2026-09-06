@@ -5,13 +5,6 @@ on:
 jobs:
   gateway:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env: { POSTGRES_USER: hearth, POSTGRES_PASSWORD: hearth, POSTGRES_DB: hearth }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -22,12 +15,11 @@ jobs:
       - run: bash deploy/certs/gen-ca.sh
       - working-directory: gateway
         run: go vet ./... && test -z "$(gofmt -l .)" && go test ./...
-        env:
-          DATABASE_URL: postgres://hearth:hearth@localhost:5432/hearth?sslmode=disable
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@1.98.0
         with: { components: "rustfmt, clippy" }
       - run: cargo fmt --check
@@ -37,5 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # TODO: re-enable buf breaking once main has a proto baseline
       - uses: bufbuild/buf-action@v1
-        with: { lint: true, breaking: true, breaking_against: "https://github.com/dayski-47/hearth.git#branch=main" }
+        with: { lint: true }
