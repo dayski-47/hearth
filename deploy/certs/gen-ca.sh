@@ -23,4 +23,5 @@ leaf() {
 
 leaf gateway hearth-gateway "DNS:localhost,DNS:hearth-gateway,IP:127.0.0.1"
 leaf agent    hearth-agent   "DNS:localhost,DNS:hearth-agent,IP:127.0.0.1"
+leaf workspace hearth-workspace "DNS:localhost,DNS:hearth-workspace,IP:127.0.0.1"
 echo "certs written to $(pwd)"
