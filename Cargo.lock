@@ -487,13 +487,11 @@ name = "hearth-workspace"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "bollard",
  "bytes",
  "futures-util",
  "hearth-common",
  "hearth-proto",
- "prost",
  "tokio",
  "tokio-stream",
  "tonic",

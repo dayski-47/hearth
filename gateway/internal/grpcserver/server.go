@@ -79,7 +79,8 @@ func (c *control) RegisterAgent(ctx context.Context, req *hv1.RegisterRequest) (
 	}
 	c.log().InfoContext(ctx, "agent registered",
 		"request_id", reqid.FromContext(ctx),
-		"host_id", req.GetHostId(), "advertise_addr", req.GetAdvertiseAddr())
+		"host_id", req.GetHostId(), "advertise_addr", req.GetAdvertiseAddr(),
+		"workspace_addr", req.GetWorkspaceAddr())
 	return &hv1.RegisterResponse{HeartbeatIntervalSeconds: 10}, nil
 }
 

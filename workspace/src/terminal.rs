@@ -21,6 +21,41 @@ fn frame(msg: ServerMsg) -> Result<TerminalServerFrame, Status> {
     Ok(TerminalServerFrame { msg: Some(msg) })
 }
 
+/// Pump exec stdout into the client until the output stream ends or the client
+/// drops the response stream. Returns `true` when the stream ended on its own
+/// (so the caller should still send the exit frame), `false` when the client
+/// went away first.
+async fn pump_stdout(
+    out_tx: &mpsc::Sender<Result<TerminalServerFrame, Status>>,
+    output: &mut (impl futures_util::Stream<Item = anyhow::Result<bytes::Bytes>> + Unpin),
+) -> bool {
+    loop {
+        tokio::select! {
+            // Stop as soon as the client goes away, even at an idle prompt
+            // where `output.next()` would otherwise pend forever.
+            _ = out_tx.closed() => return false,
+            chunk = output.next() => match chunk {
+                Some(Ok(bytes)) => {
+                    if out_tx
+                        .send(frame(ServerMsg::Stdout(bytes.to_vec())))
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                Some(Err(e)) => {
+                    let _ = out_tx
+                        .send(Err(Status::internal(format!("exec output: {e:#}"))))
+                        .await;
+                    return false;
+                }
+                None => return true,
+            },
+        }
+    }
+}
+
 // `tonic::Status` is a large error type; the generated trait forces this
 // signature on us, so match it rather than fight clippy here.
 #[allow(clippy::result_large_err)]
@@ -78,25 +113,10 @@ pub async fn open(
     let exec_for_exit = exec.clone();
     let exec_id_for_exit = exec_id.clone();
     tokio::spawn(async move {
-        while let Some(chunk) = output.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    if out_tx
-                        .send(frame(ServerMsg::Stdout(bytes.to_vec())))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let _ = out_tx
-                        .send(Err(Status::internal(format!("exec output: {e:#}"))))
-                        .await;
-                    return;
-                }
-            }
+        if !pump_stdout(&out_tx, &mut output).await {
+            return;
         }
+        // stream ended: report the exit code
         let code = exec_for_exit
             .terminal_exit_code(&exec_id_for_exit)
             .await
@@ -145,4 +165,56 @@ pub async fn open(
     });
 
     Ok(Response::new(ReceiverStream::new(rx)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::time::timeout;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn pump_stdout_stops_when_client_drops_the_stream() {
+        // An idle shell prompt: no bytes coming, ever.
+        let mut idle = futures_util::stream::pending::<anyhow::Result<bytes::Bytes>>();
+        let (tx, rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(4);
+
+        let pump = tokio::spawn(async move { pump_stdout(&tx, &mut idle).await });
+
+        // Browser tab closes.
+        drop(rx);
+
+        // Without the `out_tx.closed()` arm the pump would hang here forever.
+        let ended = timeout(Duration::from_secs(2), pump)
+            .await
+            .expect("pump task hung at an idle prompt after the client went away")
+            .expect("pump task panicked");
+        assert!(
+            !ended,
+            "client left first, so the stream did not end on its own"
+        );
+    }
+
+    #[tokio::test]
+    async fn pump_stdout_forwards_output_then_reports_the_end() {
+        let chunks = vec![
+            Ok(bytes::Bytes::from_static(b"hi")),
+            Ok(bytes::Bytes::from_static(b" there")),
+        ];
+        let mut output = futures_util::stream::iter(chunks);
+        let (tx, mut rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(4);
+
+        let ended = pump_stdout(&tx, &mut output).await;
+        assert!(ended, "the stream ran to its end");
+
+        let mut seen = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            if let Some(ServerMsg::Stdout(b)) = frame.unwrap().msg {
+                seen.extend_from_slice(&b);
+            }
+        }
+        assert_eq!(seen, b"hi there");
+    }
 }
