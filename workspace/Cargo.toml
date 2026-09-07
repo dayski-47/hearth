@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 hearth-proto = { path = "../crates/hearth-proto" }
 hearth-common = { path = "../crates/hearth-common" }
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
 tonic.workspace = true
 prost.workspace = true
 tracing.workspace = true

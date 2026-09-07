@@ -1,10 +1,20 @@
 //! Container-engine access for exec sessions inside a workspace.
 
 use anyhow::{Context, Result};
+use bollard::exec::{CreateExecOptions, ResizeExecOptions, StartExecResults};
 use bollard::Docker;
+use futures_util::StreamExt;
 
 pub struct PodmanExec {
     docker: Docker,
+}
+
+/// A live exec session: the shell's TTY output, a writer for its stdin, and the
+/// exec id needed to resize or reap it.
+pub struct TerminalHandle {
+    pub id: String,
+    pub output: std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<bytes::Bytes>> + Send>>,
+    pub input: std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
 }
 
 impl PodmanExec {
@@ -22,10 +32,84 @@ impl PodmanExec {
         Ok(())
     }
 
-    // The terminal handler reaches for the raw client to open exec sessions;
-    // that lands in the next commit, so nothing calls this yet.
-    #[allow(dead_code)]
-    pub(crate) fn docker(&self) -> &Docker {
+    /// The underlying bollard handle, so integration tests can stand up a
+    /// throwaway container to exec into without opening a second socket.
+    pub fn docker(&self) -> &Docker {
         &self.docker
+    }
+
+    /// Exec the given shell in a running container with a PTY attached, sized to
+    /// `cols` x `rows` before the shell paints its first prompt.
+    pub async fn start_terminal(
+        &self,
+        container: &str,
+        shell: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<TerminalHandle> {
+        let exec = self
+            .docker
+            .create_exec(
+                container,
+                CreateExecOptions {
+                    attach_stdin: Some(true),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    tty: Some(true),
+                    cmd: Some(vec![shell.to_string()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .context("create exec")?;
+
+        // Size the PTY before the shell starts so its prompt wraps correctly.
+        let _ = self
+            .docker
+            .resize_exec(
+                &exec.id,
+                ResizeExecOptions {
+                    height: rows,
+                    width: cols,
+                },
+            )
+            .await;
+
+        match self
+            .docker
+            .start_exec(&exec.id, None)
+            .await
+            .context("start exec")?
+        {
+            StartExecResults::Attached { output, input } => Ok(TerminalHandle {
+                id: exec.id,
+                output: Box::pin(
+                    output.map(|r| r.map(|log| log.into_bytes()).context("exec output")),
+                ),
+                input,
+            }),
+            StartExecResults::Detached => anyhow::bail!("exec started detached"),
+        }
+    }
+
+    /// Resize a live exec's PTY in response to a client resize frame.
+    pub async fn resize_terminal(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
+        self.docker
+            .resize_exec(
+                id,
+                ResizeExecOptions {
+                    height: rows,
+                    width: cols,
+                },
+            )
+            .await
+            .context("resize exec")?;
+        Ok(())
+    }
+
+    /// The exit code of a finished exec; 0 if the engine did not report one.
+    pub async fn terminal_exit_code(&self, id: &str) -> Result<i32> {
+        let inspect = self.docker.inspect_exec(id).await.context("inspect exec")?;
+        Ok(inspect.exit_code.unwrap_or(0) as i32)
     }
 }
