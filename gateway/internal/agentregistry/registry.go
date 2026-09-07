@@ -104,6 +104,18 @@ func (r *Registry) Pick(_ context.Context) (Agent, error) {
 	return Agent{}, ErrNoAgent
 }
 
+// Addr returns the advertise address of the agent with the given id, and
+// whether it is known to the registry.
+func (r *Registry) Addr(id string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.agents[id]
+	if !ok {
+		return "", false
+	}
+	return a.AdvertiseAddr, true
+}
+
 func (r *Registry) List() []Agent {
 	r.mu.Lock()
 	defer r.mu.Unlock()

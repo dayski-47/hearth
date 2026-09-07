@@ -21,6 +21,20 @@ func TestPickAfterRegister(t *testing.T) {
 	}
 }
 
+func TestAddrLooksUpByID(t *testing.T) {
+	r := agentregistry.NewInMemory()
+	ctx := context.Background()
+
+	if _, ok := r.Addr("h1"); ok {
+		t.Fatal("expected miss for unknown agent")
+	}
+	_ = r.Register(ctx, "h1", "https://localhost:9091", agentregistry.Capacity{})
+	addr, ok := r.Addr("h1")
+	if !ok || addr != "https://localhost:9091" {
+		t.Fatalf("Addr = %q %v, want the advertise addr", addr, ok)
+	}
+}
+
 func TestSweepMarksStaleLost(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now()
