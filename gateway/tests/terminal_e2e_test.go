@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -378,15 +379,15 @@ func TestTerminalE2E(t *testing.T) {
 	wsURL := "ws://" + httpLis.Addr().String() + "/api/workspaces/" + wsID + "/terminal?cols=80&rows=24"
 	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer dialCancel()
-	c, _, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{
+	c, resp, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{
 			"Cookie": {sessionCookie.String()},
 			"Origin": {originURL},
 		},
 	})
 	if err != nil {
-		t.Fatalf("dial terminal websocket: %v\n---- agent log ----\n%s\n---- workspace log ----\n%s",
-			err, agentLog.String(), wsLog.String())
+		t.Fatalf("dial terminal websocket: %v (status %s)\n---- agent log ----\n%s\n---- workspace log ----\n%s",
+			err, statusOf(resp), agentLog.String(), wsLog.String())
 	}
 	t.Cleanup(func() { _ = c.CloseNow() })
 
@@ -420,10 +421,32 @@ func TestTerminalE2E(t *testing.T) {
 	closeCtx, closeCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer closeCancel()
 	for {
-		if _, _, err := c.Read(closeCtx); err != nil {
-			t.Logf("terminal socket closed after exit: %v", err)
+		_, _, rerr := c.Read(closeCtx)
+		if rerr == nil {
+			continue // still draining trailing output
+		}
+		cleanClose := errors.Is(rerr, io.EOF) ||
+			websocket.CloseStatus(rerr) != -1 ||
+			errors.Is(rerr, net.ErrClosed)
+		if cleanClose {
+			t.Logf("terminal socket closed after exit: %v", rerr)
 			break
 		}
+		if closeCtx.Err() != nil {
+			t.Errorf("terminal socket did not close within 10s after exit: %v\n---- agent log ----\n%s\n---- workspace log ----\n%s",
+				rerr, agentLog.String(), wsLog.String())
+			break
+		}
+		// Some other transient read error: keep waiting until the deadline.
 	}
 	_ = c.Close(websocket.StatusNormalClosure, "")
+}
+
+// statusOf renders the HTTP status of a WebSocket handshake response, tolerating
+// the nil response that Dial returns when it never reached the server.
+func statusOf(resp *http.Response) string {
+	if resp == nil {
+		return "no response"
+	}
+	return resp.Status
 }
