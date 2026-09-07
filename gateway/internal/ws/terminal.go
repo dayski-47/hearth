@@ -5,6 +5,7 @@ package ws
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/go-chi/chi/v5"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type WSStore interface {
@@ -51,6 +54,12 @@ func atoiDefault(s string, def int) int {
 	return def
 }
 
+func (d Deps) logErr(ctx context.Context, msg string, args ...any) {
+	if d.Logger != nil {
+		d.Logger.ErrorContext(ctx, msg, args...)
+	}
+}
+
 func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -62,20 +71,21 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad workspace id", http.StatusBadRequest)
 		return
 	}
-	ws, err := d.Store.GetWorkspaceForOwner(r.Context(), gen.GetWorkspaceForOwnerParams{ID: id, OwnerID: u.ID})
+	wid := store.UUIDString(id)
+	wksp, err := d.Store.GetWorkspaceForOwner(r.Context(), gen.GetWorkspaceForOwnerParams{ID: id, OwnerID: u.ID})
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if ws.State != "running" {
+	if wksp.State != "running" {
 		http.Error(w, "workspace is not running", http.StatusConflict)
 		return
 	}
-	if ws.AgentID == nil {
+	if wksp.AgentID == nil {
 		http.Error(w, "workspace has no host", http.StatusConflict)
 		return
 	}
-	addr, ok := d.Reg.WorkspaceAddr(*ws.AgentID)
+	addr, ok := d.Reg.WorkspaceAddr(*wksp.AgentID)
 	if !ok {
 		http.Error(w, "workspace host unavailable", http.StatusServiceUnavailable)
 		return
@@ -92,6 +102,7 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 
 	client, closer, err := d.Dial.Dial(addr)
 	if err != nil {
+		d.logErr(ctx, "terminal: dial workspace service failed", "err", err, "workspace_id", wid, "addr", addr)
 		_ = conn.Close(websocket.StatusInternalError, "dial workspace")
 		return
 	}
@@ -99,6 +110,7 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 
 	stream, err := client.OpenTerminal(ctx)
 	if err != nil {
+		d.logErr(ctx, "terminal: open stream failed", "err", err, "workspace_id", wid)
 		_ = conn.Close(websocket.StatusInternalError, "open terminal")
 		return
 	}
@@ -108,10 +120,11 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 	rows := atoiDefault(r.URL.Query().Get("rows"), 24)
 	if err := stream.Send(&hv1.TerminalClientFrame{Msg: &hv1.TerminalClientFrame_Init{
 		Init: &hv1.TerminalInit{
-			WorkspaceId: store.UUIDString(id), Shell: shell,
+			WorkspaceId: wid, Shell: shell,
 			Cols: uint32(cols), Rows: uint32(rows),
 		},
 	}}); err != nil {
+		d.logErr(ctx, "terminal: send init failed", "err", err, "workspace_id", wid)
 		_ = conn.Close(websocket.StatusInternalError, "send init")
 		return
 	}
@@ -121,6 +134,12 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 		for {
 			f, err := stream.Recv()
 			if err != nil {
+				// A clean end is EOF (shell exited, stream closed) or a
+				// cancelled context (the request goroutine tore down first).
+				if d.Logger != nil && !errors.Is(err, io.EOF) &&
+					status.Code(err) != codes.Canceled && ctx.Err() == nil {
+					d.Logger.WarnContext(ctx, "terminal: stream ended", "err", err, "workspace_id", wid)
+				}
 				_ = conn.Close(websocket.StatusNormalClosure, "stream ended")
 				return
 			}
