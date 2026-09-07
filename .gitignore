@@ -9,3 +9,4 @@
 !.env.example
 /deploy/certs/*.pem
 /deploy/certs/*.srl
+/bin/
