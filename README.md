@@ -1,48 +1,60 @@
 # Hearth
 
-A self-hostable, browser-accessible development environment. Point it at a
-server you control, open a URL from any device, log in, and get a real Linux
-terminal and code editor running inside an isolated container on that server —
-no toolchain to install on the machine you're sitting at.
+Hearth is a self-hostable, browser-accessible development environment. Point it
+at a server you control, open a URL from any device, and log in to a real Linux
+terminal and editor running inside an isolated container on that server. There
+is nothing to install on the machine you are sitting at.
+
+> **Status:** early development, in progress. The pieces listed below work, but
+> there is no usable browser UI yet, so Hearth is not ready for real use.
+
+## Key features
+
+- **Isolated workspaces.** Every workspace is a rootless-Podman container with
+  all capabilities dropped, a read-only root filesystem, a user-namespace
+  mapping, CPU, memory and PID limits, an egress-only network, and a persistent
+  volume.
+- **Browser terminal.** A `podman exec` PTY streamed to the browser over one
+  authenticated, origin-checked WebSocket.
+- **Control plane and data plane are separate.** A stateless Go gateway holds
+  the database and the API; small per-host Rust services own the container
+  runtime. A bug in terminal handling cannot take down auth or the database.
+- **Mutual TLS everywhere.** Every call from the gateway to a host is gRPC over
+  mTLS from a local certificate authority, and the gateway verifies the client
+  certificate.
+- **Self-healing state.** A reconciliation loop keeps the database converged
+  with what the containers are actually doing, and flags a host that goes
+  silent.
+
+## Tech stack
+
+- **Gateway:** Go, chi, pgx, sqlc, goose, Postgres, `log/slog`.
+- **Data plane:** Rust, tokio, tonic, bollard, rootless Podman.
+- **Between services:** gRPC and protobuf over mutual TLS.
+- **Frontend (planned):** xterm.js, then a React editor.
 
 ## How it fits together
 
-Hearth is three services rather than one, split along a control-plane /
+Hearth is three services rather than one, split along a control-plane and
 data-plane line:
 
-- **`hearth-gateway`** (Go) — the only service a browser talks to. It owns the
+- **`hearth-gateway`** (Go) is the only service a browser talks to. It owns the
   Postgres database, handles login and sessions, tracks which worker hosts are
-  alive, exposes the REST API, and proxies terminal traffic to the data
-  plane.
-- **`hearth-agent`** (Rust) — runs on every worker host and is the only thing
-  that creates, starts, stops, and destroys workspace containers there, under a
+  alive, exposes the REST API, and proxies terminal traffic to the data plane.
+- **`hearth-agent`** (Rust) runs on every worker host. It is the only thing that
+  creates, starts, stops, and destroys workspace containers there, under a
   hardened rootless-Podman profile.
-- **`hearth-workspace`** (Rust) — also per worker host; handles the
-  high-frequency work inside a running container: terminal sessions and file
-  I/O. Terminal sessions work today; file I/O is not built yet.
+- **`hearth-workspace`** (Rust) also runs on every worker host. It handles the
+  high-frequency work inside a running container: terminal sessions now, file
+  I/O later.
 
-The gateway talks to the data-plane services over gRPC secured with mutual TLS
-from a local certificate authority.
+## Roadmap
 
-## What works today
-
-- One admin account; login, sessions, CSRF, per-IP rate limiting.
-- Create / list / inspect / start / stop / destroy a workspace over the REST
-  API — each is a real container with dropped capabilities, a read-only root,
-  a user-namespace mapping, CPU / memory / PID limits, an egress-only network,
-  and a persistent named volume.
-- A reconciliation loop that keeps the database converged with what the
-  containers are actually doing, and flags a silent host's workspaces.
-- The full terminal transport: a WebSocket on the gateway, authenticated
-  and origin-checked, bridged to a `podman exec` PTY in the workspace
-  container. Proven end to end by a gated test — but there is no terminal
-  page in the browser yet, so you can't sit down and use it.
-
-## What's next
-
-A bare `xterm.js` terminal page wired to that WebSocket, then a file tree
-and editor with live file-change events, reconnect / resume, a
-`docker-compose` + Caddy deploy with a pinned workspace base image, and
-CI with an end-to-end golden path.
-
-**Status:** early development, in progress. Not yet usable.
+- [x] Service skeleton, mutual TLS, agent registration
+- [x] Admin login, sessions, CSRF, per-IP login rate limiting
+- [x] Workspace lifecycle over the REST API, with a reconciliation loop
+- [x] Terminal transport: a gateway WebSocket bridged to a container PTY
+- [ ] A terminal page in the browser
+- [ ] File tree, editor, and live file-change events
+- [ ] Reconnect and session resume
+- [ ] `docker-compose` and Caddy deploy, a pinned workspace image, CI golden path
