@@ -39,6 +39,10 @@ type fakeStore struct {
 	seq    int
 	rows   map[string]gen.Workspace
 	events []gen.AppendWorkspaceEventParams
+	// When set, the corresponding write fails; used to exercise a store
+	// failure that lands after the agent has already done the work.
+	placementErr error
+	stateErr     error
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{rows: map[string]gen.Workspace{}} }
@@ -106,6 +110,9 @@ func (f *fakeStore) ListWorkspacesForOwner(_ context.Context, ownerID pgtype.UUI
 func (f *fakeStore) SetWorkspacePlacement(_ context.Context, p gen.SetWorkspacePlacementParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.placementErr != nil {
+		return f.placementErr
+	}
 	ws, ok := f.rows[store.UUIDString(p.ID)]
 	if !ok {
 		return errors.New("no rows")
@@ -119,6 +126,9 @@ func (f *fakeStore) SetWorkspacePlacement(_ context.Context, p gen.SetWorkspaceP
 func (f *fakeStore) SetWorkspaceState(_ context.Context, p gen.SetWorkspaceStateParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.stateErr != nil {
+		return f.stateErr
+	}
 	ws, ok := f.rows[store.UUIDString(p.ID)]
 	if !ok {
 		return errors.New("no rows")
@@ -315,6 +325,56 @@ func TestCreateAgentFailureLeavesErrorRow(t *testing.T) {
 	}
 	if !contains(st.eventKinds(), "error") {
 		t.Fatalf("events = %v, want an error event", st.eventKinds())
+	}
+}
+
+func TestCreatePlacementWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
+	// The agent already created and started the container, so the row must not
+	// be parked in "error" — that would strand a live workspace. It stays
+	// "creating" for the reconciler, and the failure is recorded.
+	st := newFakeStore()
+	st.placementErr = errors.New("db down")
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+
+	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	if err == nil {
+		t.Fatal("Create returned nil error on a failed placement write")
+	}
+	if errors.Is(err, ErrAgentCall) {
+		t.Fatalf("err = %v, want the raw store error, not ErrAgentCall", err)
+	}
+	if !contains(st.eventKinds(), "placement_failed") {
+		t.Fatalf("events = %v, want placement_failed", st.eventKinds())
+	}
+	for _, ws := range st.rows {
+		if ws.State != "creating" {
+			t.Fatalf("row state = %q, want it left at creating", ws.State)
+		}
+	}
+}
+
+func TestStopStateWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
+	st := newFakeStore()
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before := len(st.eventKinds())
+	st.stateErr = errors.New("db down")
+
+	if _, err := s.Stop(context.Background(), mustUUID(t, ownerAID), ws.ID); err == nil {
+		t.Fatal("Stop returned nil error on a failed state write")
+	} else if errors.Is(err, ErrAgentCall) {
+		t.Fatalf("err = %v, want the raw store error, not ErrAgentCall", err)
+	}
+	if !contains(st.eventKinds()[before:], "state_write_failed") {
+		t.Fatalf("events = %v, want state_write_failed", st.eventKinds())
+	}
+	stored, _ := st.get(ws.ID)
+	if stored.State == "error" {
+		t.Fatalf("row parked in error despite a healthy container: %+v", stored)
 	}
 }
 

@@ -119,7 +119,8 @@ type loginRequest struct {
 
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r, h.cfg.TrustedProxies)
-	// NOTE: a 503 from the verify cap still spends a rate-limit token; acceptable — the alternative lets an attacker probe cap state for free.
+	// NOTE: a 503 from the verify cap still spends a rate-limit token;
+	// acceptable — the alternative lets an attacker probe cap state for free.
 	if !h.limiter.allow(ip) {
 		writeError(w, http.StatusTooManyRequests, "rate limited")
 		return
@@ -228,7 +229,9 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 		xff = xff[i+1:]
 	}
 	if v := strings.TrimSpace(xff); v != "" {
-		// NOTE: with a chain of trusted proxies this is the innermost proxy, so clients behind it share one limiter key (over-limiting, never bypass).
+		// NOTE: with a chain of trusted proxies this is the innermost proxy,
+		// so clients behind it share one limiter key (over-limiting, never
+		// bypass).
 		if _, err := netip.ParseAddr(v); err != nil {
 			return host // the socket peer; a garbled forwarded hop is not a key
 		}

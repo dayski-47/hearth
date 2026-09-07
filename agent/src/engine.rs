@@ -53,6 +53,11 @@ pub fn workspace_host_config(spec: &WorkspaceContainerSpec) -> HostConfig {
         cap_drop: Some(vec!["ALL".to_string()]),
         security_opt: Some(vec!["no-new-privileges".to_string()]),
         readonly_rootfs: Some(true),
+        ulimits: Some(vec![bollard::models::ResourcesUlimits {
+            name: Some("nofile".to_string()),
+            soft: Some(4096),
+            hard: Some(8192),
+        }]),
         userns_mode: Some(userns.to_string()),
         network_mode: Some(network_mode),
         tmpfs: Some(tmpfs),
@@ -93,6 +98,12 @@ pub struct PodmanEngine {
 }
 
 impl PodmanEngine {
+    /// The underlying bollard handle, so integration tests can inspect what
+    /// actually landed on a live container without opening a second socket.
+    pub fn docker(&self) -> &Docker {
+        &self.docker
+    }
+
     pub fn connect(socket: Option<&str>) -> Result<Self> {
         let docker = match socket {
             Some(path) => Docker::connect_with_socket(path, 120, bollard::API_DEFAULT_VERSION)
@@ -128,7 +139,13 @@ impl ContainerEngine for PodmanEngine {
                     None,
                 );
                 while let Some(x) = stream.next().await {
-                    x.context("pull image")?;
+                    // Podman reports a failed pull (manifest unknown, auth
+                    // denied) as HTTP 200 with an error frame in the stream, so
+                    // the transport-level `?` above is not enough.
+                    let info = x.context("pull image")?;
+                    if let Some(err) = info.error {
+                        anyhow::bail!("pull image {image}: {err}");
+                    }
                 }
                 Ok(())
             }
@@ -137,21 +154,30 @@ impl ContainerEngine for PodmanEngine {
     }
 
     async fn ensure_network(&self, name: &str) -> Result<()> {
-        use bollard::network::CreateNetworkOptions;
+        use bollard::network::{CreateNetworkOptions, InspectNetworkOptions};
+        // Inspect-then-create, like ensure_image: Podman does not answer a
+        // duplicate create with a 409, so keying idempotency off the create
+        // response would fail every workspace after the first.
         match self
             .docker
-            .create_network(CreateNetworkOptions {
-                name: name.to_string(),
-                check_duplicate: false,
-                ..Default::default()
-            })
+            .inspect_network(name, None::<InspectNetworkOptions<String>>)
             .await
         {
             Ok(_) => Ok(()),
             Err(bollard::errors::Error::DockerResponseServerError {
-                status_code: 409, ..
-            }) => Ok(()),
-            Err(e) => Err(e).context("create network"),
+                status_code: 404, ..
+            }) => {
+                self.docker
+                    .create_network(CreateNetworkOptions {
+                        name: name.to_string(),
+                        check_duplicate: false,
+                        ..Default::default()
+                    })
+                    .await
+                    .context("create network")?;
+                Ok(())
+            }
+            Err(e) => Err(e).context("ensure network"),
         }
     }
 
@@ -229,7 +255,8 @@ impl ContainerEngine for PodmanEngine {
 
     async fn remove(&self, id: &str) -> Result<()> {
         use bollard::container::RemoveContainerOptions;
-        self.docker
+        match self
+            .docker
             .remove_container(
                 id,
                 Some(RemoveContainerOptions {
@@ -239,8 +266,15 @@ impl ContainerEngine for PodmanEngine {
                 }),
             )
             .await
-            .context("remove container")?;
-        Ok(())
+        {
+            Ok(()) => Ok(()),
+            // Teardown is idempotent: a workspace whose container never came up
+            // must still be destroyable.
+            Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(()),
+            Err(e) => Err(e).context("remove container"),
+        }
     }
 
     async fn inspect_state(&self, id: &str) -> Result<ContainerRunState> {
@@ -291,6 +325,10 @@ mod tests {
         assert_eq!(hc.memory_swap, hc.memory); // swap disabled
         assert_eq!(hc.nano_cpus, Some(2_000_000_000)); // 2000 millis -> 2 CPUs
         assert_eq!(hc.pids_limit, Some(512));
+        let ulimits = hc.ulimits.as_ref().unwrap();
+        assert!(ulimits.iter().any(|u| u.name.as_deref() == Some("nofile")
+            && u.soft == Some(4096)
+            && u.hard == Some(8192)));
         // /workspace is the volume, /tmp is a capped tmpfs, nothing else writable
         let mounts = hc.mounts.as_ref().unwrap();
         assert!(mounts

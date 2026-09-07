@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/config"
@@ -30,6 +31,10 @@ var (
 	// state; the row is left parked in "error".
 	ErrAgentCall = errors.New("workspaces: agent call failed")
 )
+
+// agentRPCTimeout bounds a single gateway->agent call. Without it a wedged
+// Podman socket on one host holds an HTTP handler open indefinitely.
+const agentRPCTimeout = 20 * time.Second
 
 // Store is the subset of *gen.Queries the service calls. *gen.Queries satisfies it.
 type Store interface {
@@ -123,7 +128,9 @@ func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image s
 	}
 	defer closer.Close()
 
-	resp, err := client.CreateWorkspace(ctx, &hv1.CreateWorkspaceRequest{
+	rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+	defer cancel()
+	resp, err := client.CreateWorkspace(rpcCtx, &hv1.CreateWorkspaceRequest{
 		WorkspaceId: store.UUIDString(ws.ID), Image: image, Limits: s.limits(),
 		Network: s.def.Network, Userns: s.def.UserNS,
 	})
@@ -139,6 +146,10 @@ func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image s
 	if err := s.st.SetWorkspacePlacement(ctx, gen.SetWorkspacePlacementParams{
 		ID: ws.ID, ContainerID: &cid, State: "running",
 	}); err != nil {
+		// The container is up and only the row write failed. Record it and
+		// leave the row in "creating" for the reconciler to converge; parking a
+		// live workspace in "error" would strand the container.
+		s.storeWriteFailed(ctx, ws.ID, "placement_failed", err)
 		return gen.Workspace{}, err
 	}
 	s.event(ctx, ws.ID, "running", map[string]string{"container_id": cid})
@@ -164,14 +175,18 @@ func (s *Service) List(ctx context.Context, ownerID pgtype.UUID) ([]gen.Workspac
 // Start drives the owning agent's StartWorkspace and converges the row.
 func (s *Service) Start(ctx context.Context, ownerID, id pgtype.UUID) (gen.Workspace, error) {
 	return s.drive(ctx, ownerID, id, "StartWorkspace", func(c hv1.AgentClient) (*hv1.Workspace, error) {
-		return c.StartWorkspace(ctx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)})
+		rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+		defer cancel()
+		return c.StartWorkspace(rpcCtx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)})
 	})
 }
 
 // Stop drives the owning agent's StopWorkspace and converges the row.
 func (s *Service) Stop(ctx context.Context, ownerID, id pgtype.UUID) (gen.Workspace, error) {
 	return s.drive(ctx, ownerID, id, "StopWorkspace", func(c hv1.AgentClient) (*hv1.Workspace, error) {
-		return c.StopWorkspace(ctx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)})
+		rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+		defer cancel()
+		return c.StopWorkspace(rpcCtx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)})
 	})
 }
 
@@ -197,7 +212,9 @@ func (s *Service) Destroy(ctx context.Context, ownerID, id pgtype.UUID) error {
 			return s.parkErr(ctx, id, "dial agent: "+derr.Error())
 		}
 		defer closer.Close()
-		if _, cerr := client.DestroyWorkspace(ctx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)}); cerr != nil {
+		rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+		defer cancel()
+		if _, cerr := client.DestroyWorkspace(rpcCtx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)}); cerr != nil {
 			return s.parkErr(ctx, id, "agent DestroyWorkspace: "+cerr.Error())
 		}
 	}
@@ -206,6 +223,15 @@ func (s *Service) Destroy(ctx context.Context, ownerID, id pgtype.UUID) error {
 	}
 	s.logger.InfoContext(ctx, "workspace destroyed", "workspace_id", store.UUIDString(id))
 	return nil
+}
+
+// storeWriteFailed records a store write that failed after the agent had
+// already done the work. The row is deliberately left as-is: the container is
+// running, and the reconciler converges the row on its next pass.
+func (s *Service) storeWriteFailed(ctx context.Context, id pgtype.UUID, kind string, err error) {
+	s.event(ctx, id, kind, map[string]string{"error": err.Error()})
+	s.logger.WarnContext(ctx, "workspace store write failed after agent call",
+		"workspace_id", store.UUIDString(id), "error", err)
 }
 
 // parkErr sets the row to error, records the reason, and returns ErrAgentCall.
@@ -260,6 +286,9 @@ func (s *Service) drive(ctx context.Context, ownerID, id pgtype.UUID, kind strin
 		return fail("agent " + kind + " reported " + resp.State.String() + ": " + resp.Message)
 	}
 	if err := s.st.SetWorkspaceState(ctx, gen.SetWorkspaceStateParams{ID: id, State: want}); err != nil {
+		// The agent already made the transition; only the row write failed.
+		// Same reasoning as Create: record it, leave the row for the reconciler.
+		s.storeWriteFailed(ctx, id, "state_write_failed", err)
 		return gen.Workspace{}, err
 	}
 	s.event(ctx, id, want, nil)

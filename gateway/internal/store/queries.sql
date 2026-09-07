@@ -73,11 +73,12 @@ UPDATE workspaces
 DELETE FROM workspaces WHERE id = $1;
 
 -- name: ListReconcilableWorkspaces :many
-SELECT * FROM workspaces WHERE state IN ('running', 'stopped', 'unknown');
+SELECT * FROM workspaces WHERE state IN ('creating', 'running', 'stopped', 'unknown');
 
--- name: MarkAgentWorkspacesUnknown :execrows
+-- name: MarkAgentWorkspacesUnknown :many
 UPDATE workspaces SET state = 'unknown', updated_at = now()
- WHERE agent_id = $1 AND state IN ('creating', 'running', 'stopped');
+ WHERE agent_id = $1 AND state IN ('creating', 'running', 'stopped')
+ RETURNING id;
 
 -- name: AppendWorkspaceEvent :exec
 INSERT INTO workspace_events (workspace_id, kind, detail) VALUES ($1, $2, $3);

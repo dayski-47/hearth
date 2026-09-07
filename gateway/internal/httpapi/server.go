@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/store"
@@ -19,18 +18,18 @@ type Server struct {
 	cfg    *config.Config
 	st     *store.Store
 	logger *slog.Logger
-	// reg is the live agent registry. Unused by Phase 1 handlers; retained for
-	// workspace placement in Plan 2.
-	reg  *agentregistry.Registry
-	auth *auth.Handlers
-	ws   *workspaceHandlers
+	auth   *auth.Handlers
+	// ws is nil when the server is built without a workspace service; the
+	// /workspaces routes are then simply not mounted.
+	ws *workspaceHandlers
 }
 
-func New(cfg *config.Config, st *store.Store, logger *slog.Logger, reg *agentregistry.Registry, authH *auth.Handlers, wsSvc *workspaces.Service) *Server {
-	return &Server{
-		cfg: cfg, st: st, logger: logger, reg: reg, auth: authH,
-		ws: &workspaceHandlers{svc: wsSvc, logger: logger},
+func New(cfg *config.Config, st *store.Store, logger *slog.Logger, authH *auth.Handlers, wsSvc *workspaces.Service) *Server {
+	s := &Server{cfg: cfg, st: st, logger: logger, auth: authH}
+	if wsSvc != nil {
+		s.ws = &workspaceHandlers{svc: wsSvc, logger: logger}
 	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -53,14 +52,16 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.auth.RequireSession())
 		r.Post("/auth/logout", s.auth.Logout)
 		r.Get("/auth/me", s.auth.Me)
-		r.Route("/workspaces", func(r chi.Router) {
-			r.Post("/", s.ws.create)
-			r.Get("/", s.ws.list)
-			r.Get("/{id}", s.ws.get)
-			r.Post("/{id}/start", s.ws.start)
-			r.Post("/{id}/stop", s.ws.stop)
-			r.Delete("/{id}", s.ws.destroy)
-		})
+		if s.ws != nil {
+			r.Route("/workspaces", func(r chi.Router) {
+				r.Post("/", s.ws.create)
+				r.Get("/", s.ws.list)
+				r.Get("/{id}", s.ws.get)
+				r.Post("/{id}/start", s.ws.start)
+				r.Post("/{id}/stop", s.ws.stop)
+				r.Delete("/{id}", s.ws.destroy)
+			})
+		}
 	})
 	return r
 }

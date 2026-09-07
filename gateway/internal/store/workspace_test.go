@@ -59,14 +59,32 @@ func TestWorkspaceLifecycleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recon, err := s.Queries().ListReconcilableWorkspaces(ctx)
-	if err != nil || len(recon) != 1 {
-		t.Fatalf("reconcilable=%d err=%v", len(recon), err)
+	// A row still in "creating" is not terminal, so it must be reconcilable:
+	// a create interrupted after the agent call leaves a live container behind.
+	stuck, err := s.Queries().CreateWorkspace(ctx, gen.CreateWorkspaceParams{
+		OwnerID: u.ID, Name: "stuck", Image: "busybox:stable", AgentID: &host,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	n, err := s.Queries().MarkAgentWorkspacesUnknown(ctx, &host)
-	if err != nil || n != 1 {
-		t.Fatalf("marked=%d err=%v", n, err)
+	recon, err := s.Queries().ListReconcilableWorkspaces(ctx)
+	if err != nil || len(recon) != 2 {
+		t.Fatalf("reconcilable=%d err=%v", len(recon), err)
+	}
+	var sawCreating bool
+	for _, r := range recon {
+		if r.ID == stuck.ID && r.State == "creating" {
+			sawCreating = true
+		}
+	}
+	if !sawCreating {
+		t.Fatalf("reconcilable rows %+v omit the creating row", recon)
+	}
+
+	marked, err := s.Queries().MarkAgentWorkspacesUnknown(ctx, &host)
+	if err != nil || len(marked) != 2 {
+		t.Fatalf("marked=%d err=%v", len(marked), err)
 	}
 
 	if err := s.Queries().DeleteWorkspace(ctx, ws.ID); err != nil {

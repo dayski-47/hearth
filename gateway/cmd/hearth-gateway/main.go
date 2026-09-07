@@ -124,7 +124,7 @@ func runServe() error {
 	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, reg, authH, wsSvc).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)
@@ -155,9 +155,13 @@ func runServe() error {
 			case <-gctx.Done():
 				return nil
 			case <-t.C:
-				if err := reconcile.Converge(gctx, reconcile.Deps{
+				// Bound the pass so a wedged agent cannot stall the ticker.
+				passCtx, cancel := context.WithTimeout(gctx, 2*time.Minute)
+				err := reconcile.Converge(passCtx, reconcile.Deps{
 					Store: st.Queries(), Dial: dialer, Reg: reg, Logger: logger,
-				}); err != nil {
+				})
+				cancel()
+				if err != nil {
 					logger.Warn("reconcile pass failed", "error", err)
 				}
 			}

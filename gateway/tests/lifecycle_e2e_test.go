@@ -226,7 +226,7 @@ func TestLifecycleE2E(t *testing.T) {
 	}, logger)
 	dialer := agentDialer{tls: agentTLS}
 	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
-	httpSrv := httptest.NewServer(httpapi.New(cfg, st, logger, reg, authH, wsSvc).Handler())
+	httpSrv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, wsSvc).Handler())
 	t.Cleanup(httpSrv.Close)
 
 	// --- 5. Real hearth-agent against real Podman ---------------------

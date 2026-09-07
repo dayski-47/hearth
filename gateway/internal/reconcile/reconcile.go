@@ -8,11 +8,17 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"time"
 
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// agentRPCTimeout bounds a single gateway->agent call so one wedged Podman
+// socket cannot stall the whole reconcile pass.
+const agentRPCTimeout = 20 * time.Second
 
 // Store is the subset of *gen.Queries the reconciler calls. *gen.Queries
 // satisfies it.
@@ -20,7 +26,7 @@ type Store interface {
 	ListReconcilableWorkspaces(context.Context) ([]gen.Workspace, error)
 	SetWorkspaceState(context.Context, gen.SetWorkspaceStateParams) error
 	AppendWorkspaceEvent(context.Context, gen.AppendWorkspaceEventParams) error
-	MarkAgentWorkspacesUnknown(context.Context, *string) (int64, error)
+	MarkAgentWorkspacesUnknown(context.Context, *string) ([]pgtype.UUID, error)
 }
 
 // Dialer opens a client to an agent at addr. The production impl closes over
@@ -60,11 +66,24 @@ func Converge(ctx context.Context, d Deps) error {
 	for _, id := range d.Reg.LostAgents() {
 		lost[id] = true
 		aid := id
-		if n, err := d.Store.MarkAgentWorkspacesUnknown(ctx, &aid); err != nil {
+		marked, err := d.Store.MarkAgentWorkspacesUnknown(ctx, &aid)
+		if err != nil {
 			d.Logger.WarnContext(ctx, "mark agent workspaces unknown failed", "agent_id", id, "error", err)
-		} else if n > 0 {
-			d.Logger.WarnContext(ctx, "agent lost, workspaces marked unknown", "agent_id", id, "count", n)
+			continue
 		}
+		if len(marked) == 0 {
+			continue
+		}
+		// Every state change gets an event, bulk mark included.
+		detail, _ := json.Marshal(map[string]string{"agent_id": id})
+		for _, wsID := range marked {
+			if err := d.Store.AppendWorkspaceEvent(ctx, gen.AppendWorkspaceEventParams{
+				WorkspaceID: wsID, Kind: "agent_lost", Detail: detail,
+			}); err != nil {
+				d.Logger.WarnContext(ctx, "append agent_lost event failed", "workspace_id", store.UUIDString(wsID), "error", err)
+			}
+		}
+		d.Logger.WarnContext(ctx, "agent lost, workspaces marked unknown", "agent_id", id, "count", len(marked))
 	}
 
 	rows, err := d.Store.ListReconcilableWorkspaces(ctx)
@@ -84,7 +103,9 @@ func Converge(ctx context.Context, d Deps) error {
 			d.Logger.WarnContext(ctx, "reconcile dial failed", "agent_id", *ws.AgentID, "error", err)
 			continue
 		}
-		got, err := client.GetWorkspace(ctx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(ws.ID)})
+		rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+		got, err := client.GetWorkspace(rpcCtx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(ws.ID)})
+		cancel()
 		closer.Close()
 		if err != nil {
 			d.Logger.WarnContext(ctx, "reconcile GetWorkspace failed", "workspace_id", store.UUIDString(ws.ID), "error", err)

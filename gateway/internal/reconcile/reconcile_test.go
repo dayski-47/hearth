@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -35,7 +36,7 @@ type fakeStore struct {
 	states       []gen.SetWorkspaceStateParams
 	events       []gen.AppendWorkspaceEventParams
 	markedAgents []string
-	markCount    int64
+	markIDs      []pgtype.UUID
 }
 
 func (f *fakeStore) ListReconcilableWorkspaces(context.Context) ([]gen.Workspace, error) {
@@ -59,13 +60,13 @@ func (f *fakeStore) AppendWorkspaceEvent(_ context.Context, p gen.AppendWorkspac
 	return nil
 }
 
-func (f *fakeStore) MarkAgentWorkspacesUnknown(_ context.Context, agentID *string) (int64, error) {
+func (f *fakeStore) MarkAgentWorkspacesUnknown(_ context.Context, agentID *string) ([]pgtype.UUID, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if agentID != nil {
 		f.markedAgents = append(f.markedAgents, *agentID)
 	}
-	return f.markCount, nil
+	return f.markIDs, nil
 }
 
 func (f *fakeStore) eventKinds() []string {
@@ -204,7 +205,7 @@ func TestConvergeMarksLostAgentWorkspacesUnknown(t *testing.T) {
 	live := mustUUID(t, "00000000-0000-0000-0000-000000000003")
 	onLost := mustUUID(t, "00000000-0000-0000-0000-000000000004")
 	st := &fakeStore{
-		markCount: 2,
+		markIDs: []pgtype.UUID{onLost},
 		rows: []gen.Workspace{
 			{ID: live, State: "running", AgentID: strptr("h1")},
 			{ID: onLost, State: "running", AgentID: strptr("h2")},
@@ -225,6 +226,43 @@ func TestConvergeMarksLostAgentWorkspacesUnknown(t *testing.T) {
 	// h2's row must not be polled; only h1 dialed.
 	if len(dial.dialed) != 1 || dial.dialed[0] != "https://h1:9091" {
 		t.Fatalf("dialed = %v, want only h1", dial.dialed)
+	}
+	// The bulk mark is a state change, so it owes every affected row an event.
+	if len(st.events) != 1 || st.events[0].Kind != "agent_lost" ||
+		store.UUIDString(st.events[0].WorkspaceID) != store.UUIDString(onLost) {
+		t.Fatalf("events = %+v, want one agent_lost for %s", st.events, store.UUIDString(onLost))
+	}
+	var detail map[string]string
+	if err := json.Unmarshal(st.events[0].Detail, &detail); err != nil {
+		t.Fatalf("decode event detail: %v", err)
+	}
+	if detail["agent_id"] != "h2" {
+		t.Fatalf("event detail = %v, want agent_id h2", detail)
+	}
+}
+
+func TestConvergeReconcilesCreatingRow(t *testing.T) {
+	// A create interrupted after the agent call leaves a "creating" row with a
+	// live container; the next pass must converge it, not ignore it.
+	id := mustUUID(t, "00000000-0000-0000-0000-000000000006")
+	st := &fakeStore{rows: []gen.Workspace{
+		{ID: id, State: "creating", AgentID: strptr("h1")},
+	}}
+	dial := &fakeDialer{client: &fakeAgentClient{
+		getFn: func(_ context.Context, in *hv1.WorkspaceRef) (*hv1.Workspace, error) {
+			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_RUNNING}, nil
+		},
+	}}
+	reg := fakeRegistry{addrs: map[string]string{"h1": "https://h1:9091"}}
+
+	if err := Converge(context.Background(), Deps{Store: st, Dial: dial, Reg: reg, Logger: testLogger()}); err != nil {
+		t.Fatalf("Converge: %v", err)
+	}
+	if len(st.states) != 1 || st.states[0].State != "running" {
+		t.Fatalf("states = %+v, want one running write", st.states)
+	}
+	if !contains(st.eventKinds(), "reconciled") {
+		t.Fatalf("events = %v, want reconciled", st.eventKinds())
 	}
 }
 

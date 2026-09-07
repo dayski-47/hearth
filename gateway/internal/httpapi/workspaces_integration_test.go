@@ -143,7 +143,7 @@ func newWorkspaceTestServer(t *testing.T) (*httptest.Server, *http.Cookie, *scri
 	agent := &scriptedAgent{}
 	svc := workspaces.NewService(st.Queries(), stubRegistry{}, stubDialer{agent: agent}, cfg.Workspace, logger)
 
-	srv := httptest.NewServer(httpapi.New(cfg, st, logger, nil, authH, svc).Handler())
+	srv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, svc).Handler())
 	t.Cleanup(srv.Close)
 
 	resp := post(t, srv.Client(), srv.URL+"/api/auth/login", `{"username":"admin","password":"correct-horse"}`, "1")
