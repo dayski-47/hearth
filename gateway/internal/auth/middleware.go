@@ -20,6 +20,13 @@ func UserFromContext(ctx context.Context) (*gen.User, bool) {
 	return u, ok
 }
 
+// ContextWithUser attaches u as the authenticated user. RequireSession uses it
+// after a good cookie; tests and other entry points that already know the user
+// use it directly.
+func ContextWithUser(ctx context.Context, u *gen.User) context.Context {
+	return context.WithValue(ctx, userKey, u)
+}
+
 // RequireSession authenticates the hearth_session cookie and attaches the user
 // to the request context, or responds 401.
 func RequireSession(m *Manager, logger *slog.Logger) func(http.Handler) http.Handler {
@@ -35,7 +42,7 @@ func RequireSession(m *Manager, logger *slog.Logger) func(http.Handler) http.Han
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			next.ServeHTTP(w, r.WithContext(ContextWithUser(r.Context(), u)))
 		})
 	}
 }

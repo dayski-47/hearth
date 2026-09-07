@@ -124,7 +124,7 @@ func runServe() error {
 	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc, nil).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)

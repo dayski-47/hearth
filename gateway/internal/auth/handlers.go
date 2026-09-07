@@ -105,7 +105,7 @@ func (h *Handlers) RequireSession() func(http.Handler) http.Handler {
 			if !strings.HasSuffix(r.URL.Path, "/auth/logout") {
 				http.SetCookie(w, h.cookie(c.Value, int(sessionTTL.Seconds())))
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			next.ServeHTTP(w, r.WithContext(ContextWithUser(r.Context(), u)))
 		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/workspaces"
+	"github.com/dayski-47/hearth/gateway/internal/ws"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -22,10 +23,13 @@ type Server struct {
 	// ws is nil when the server is built without a workspace service; the
 	// /workspaces routes are then simply not mounted.
 	ws *workspaceHandlers
+	// term is nil when the server is built without the terminal bridge; the
+	// /workspaces/{id}/terminal route is then simply not mounted.
+	term *ws.Deps
 }
 
-func New(cfg *config.Config, st *store.Store, logger *slog.Logger, authH *auth.Handlers, wsSvc *workspaces.Service) *Server {
-	s := &Server{cfg: cfg, st: st, logger: logger, auth: authH}
+func New(cfg *config.Config, st *store.Store, logger *slog.Logger, authH *auth.Handlers, wsSvc *workspaces.Service, term *ws.Deps) *Server {
+	s := &Server{cfg: cfg, st: st, logger: logger, auth: authH, term: term}
 	if wsSvc != nil {
 		s.ws = &workspaceHandlers{svc: wsSvc, logger: logger}
 	}
@@ -60,6 +64,9 @@ func (s *Server) Handler() http.Handler {
 				r.Post("/{id}/start", s.ws.start)
 				r.Post("/{id}/stop", s.ws.stop)
 				r.Delete("/{id}", s.ws.destroy)
+				if s.term != nil {
+					r.Get("/{id}/terminal", s.term.Terminal)
+				}
 			})
 		}
 	})

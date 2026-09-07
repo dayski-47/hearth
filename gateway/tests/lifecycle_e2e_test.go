@@ -226,7 +226,7 @@ func TestLifecycleE2E(t *testing.T) {
 	}, logger)
 	dialer := agentDialer{tls: agentTLS}
 	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
-	httpSrv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, wsSvc).Handler())
+	httpSrv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, wsSvc, nil).Handler())
 	t.Cleanup(httpSrv.Close)
 
 	// --- 5. Real hearth-agent against real Podman ---------------------
@@ -238,6 +238,7 @@ func TestLifecycleE2E(t *testing.T) {
 		"HEARTH_AGENT_GRPC_LISTEN_ADDR="+agentAddr,
 		"HEARTH_AGENT_ADDR=https://"+agentAddr,
 		"HEARTH_GATEWAY_GRPC_ADDR=https://"+gatewayGRPCAddr,
+		"HEARTH_WORKSPACE_ADDR=https://127.0.0.1:1",
 		"HEARTH_TLS_CA="+caPEM,
 		"HEARTH_AGENT_TLS_CERT="+agentCert,
 		"HEARTH_AGENT_TLS_KEY="+agentKey,

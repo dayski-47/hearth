@@ -3,6 +3,7 @@ module github.com/dayski-47/hearth/gateway
 go 1.27
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.28.0
