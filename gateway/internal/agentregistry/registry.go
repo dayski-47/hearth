@@ -116,6 +116,21 @@ func (r *Registry) Addr(id string) (string, bool) {
 	return a.AdvertiseAddr, true
 }
 
+// LostAgents returns the ids of every agent currently marked "lost". The
+// reconciler uses it to bulk-mark those agents' workspaces "unknown" instead of
+// polling them.
+func (r *Registry) LostAgents() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for id, a := range r.agents {
+		if a.Status == "lost" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func (r *Registry) List() []Agent {
 	r.mu.Lock()
 	defer r.mu.Unlock()

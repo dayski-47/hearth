@@ -23,6 +23,7 @@ import (
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
 	"github.com/dayski-47/hearth/gateway/internal/password"
+	"github.com/dayski-47/hearth/gateway/internal/reconcile"
 	"github.com/dayski-47/hearth/gateway/internal/reqid"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
@@ -119,7 +120,8 @@ func runServe() error {
 	if err != nil {
 		return err
 	}
-	wsSvc := workspaces.NewService(st.Queries(), reg, agentDialer{tls: agentTLS}, cfg.Workspace, logger)
+	dialer := agentDialer{tls: agentTLS}
+	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return httpapi.New(cfg, st, logger, reg, authH, wsSvc).Run(gctx) })
@@ -141,6 +143,22 @@ func runServe() error {
 						logger.Warn("persist agent lost failed", "host_id", id, "error", err)
 					}
 					logger.Warn("agent lost", "host_id", id)
+				}
+			}
+		}
+	})
+	g.Go(func() error {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-gctx.Done():
+				return nil
+			case <-t.C:
+				if err := reconcile.Converge(gctx, reconcile.Deps{
+					Store: st.Queries(), Dial: dialer, Reg: reg, Logger: logger,
+				}); err != nil {
+					logger.Warn("reconcile pass failed", "error", err)
 				}
 			}
 		}

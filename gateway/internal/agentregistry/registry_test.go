@@ -35,6 +35,33 @@ func TestAddrLooksUpByID(t *testing.T) {
 	}
 }
 
+func TestLostAgentsListsOnlyLost(t *testing.T) {
+	ctx := context.Background()
+	base := time.Now()
+	r := agentregistry.NewInMemoryWithClock(func() time.Time { return base })
+
+	_ = r.Register(ctx, "h1", "addr1", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h2", "addr2", agentregistry.Capacity{})
+	if lost := r.LostAgents(); len(lost) != 0 {
+		t.Fatalf("expected no lost agents, got %v", lost)
+	}
+
+	r.Sweep(ctx, base.Add(31*time.Second), 30*time.Second)
+	lost := r.LostAgents()
+	if len(lost) != 2 {
+		t.Fatalf("expected both agents lost, got %v", lost)
+	}
+
+	// a heartbeat revives one; it drops off the lost list
+	if err := r.Heartbeat(ctx, "h1"); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	lost = r.LostAgents()
+	if len(lost) != 1 || lost[0] != "h2" {
+		t.Fatalf("expected [h2], got %v", lost)
+	}
+}
+
 func TestSweepMarksStaleLost(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now()
