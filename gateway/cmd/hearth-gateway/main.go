@@ -28,7 +28,9 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/dayski-47/hearth/gateway/internal/tlsutil"
+	"github.com/dayski-47/hearth/gateway/internal/workspaceclient"
 	"github.com/dayski-47/hearth/gateway/internal/workspaces"
+	"github.com/dayski-47/hearth/gateway/internal/ws"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -123,8 +125,20 @@ func runServe() error {
 	dialer := agentDialer{tls: agentTLS}
 	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
 
+	wsTLS, err := tlsutil.ClientConfig(cfg.TLS.CA, cfg.TLS.Cert, cfg.TLS.Key, "hearth-workspace")
+	if err != nil {
+		return err
+	}
+	term := &ws.Deps{
+		Store:         st.Queries(),
+		Reg:           reg,
+		Dial:          wsDialer{tls: wsTLS},
+		AllowedOrigin: cfg.AllowedOrigin,
+		Logger:        logger,
+	}
+
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc, nil).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc, term).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)
@@ -193,6 +207,13 @@ type agentDialer struct{ tls *tls.Config }
 
 func (d agentDialer) Dial(addr string) (hv1.AgentClient, io.Closer, error) {
 	return agentclient.Dial(addr, d.tls)
+}
+
+// wsDialer adapts the mTLS config and workspaceclient.Dial to ws.WSDialer.
+type wsDialer struct{ tls *tls.Config }
+
+func (d wsDialer) Dial(addr string) (hv1.WorkspaceIoClient, io.Closer, error) {
+	return workspaceclient.Dial(addr, d.tls)
 }
 
 // storeAgentPersistence adapts *store.Store to grpcserver.AgentPersistence.
