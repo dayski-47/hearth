@@ -45,3 +45,39 @@ DELETE FROM sessions WHERE id = $1;
 
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at < now();
+
+-- name: CreateWorkspace :one
+INSERT INTO workspaces (owner_id, name, image, agent_id, state)
+VALUES ($1, $2, $3, $4, 'creating')
+RETURNING *;
+
+-- name: GetWorkspaceForOwner :one
+SELECT * FROM workspaces WHERE id = $1 AND owner_id = $2;
+
+-- name: ListWorkspacesForOwner :many
+SELECT * FROM workspaces WHERE owner_id = $1 ORDER BY created_at DESC;
+
+-- name: SetWorkspacePlacement :exec
+UPDATE workspaces
+   SET container_id = $2, state = $3, updated_at = now(),
+       last_started_at = CASE WHEN $3 = 'running' THEN now() ELSE last_started_at END
+ WHERE id = $1;
+
+-- name: SetWorkspaceState :exec
+UPDATE workspaces
+   SET state = $2, updated_at = now(),
+       last_started_at = CASE WHEN $2 = 'running' THEN now() ELSE last_started_at END
+ WHERE id = $1;
+
+-- name: DeleteWorkspace :exec
+DELETE FROM workspaces WHERE id = $1;
+
+-- name: ListReconcilableWorkspaces :many
+SELECT * FROM workspaces WHERE state IN ('running', 'stopped', 'unknown');
+
+-- name: MarkAgentWorkspacesUnknown :execrows
+UPDATE workspaces SET state = 'unknown', updated_at = now()
+ WHERE agent_id = $1 AND state IN ('creating', 'running', 'stopped');
+
+-- name: AppendWorkspaceEvent :exec
+INSERT INTO workspace_events (workspace_id, kind, detail) VALUES ($1, $2, $3);
