@@ -385,8 +385,12 @@ func TestStopAgentErrorStateReturnsErrAgentCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := s.Stop(context.Background(), mustUUID(t, ownerAID), ws.ID); !errors.Is(err, ErrAgentCall) {
+	got, err := s.Stop(context.Background(), mustUUID(t, ownerAID), ws.ID)
+	if !errors.Is(err, ErrAgentCall) {
 		t.Fatalf("Stop err = %v, want ErrAgentCall", err)
+	}
+	if got.State != "error" {
+		t.Fatalf("returned state = %q, want error", got.State)
 	}
 	stored, _ := st.get(ws.ID)
 	if stored.State != "error" {

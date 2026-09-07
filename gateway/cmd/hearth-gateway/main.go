@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -13,16 +15,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/agentclient"
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/grpcserver"
+	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
 	"github.com/dayski-47/hearth/gateway/internal/password"
 	"github.com/dayski-47/hearth/gateway/internal/reqid"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/dayski-47/hearth/gateway/internal/tlsutil"
+	"github.com/dayski-47/hearth/gateway/internal/workspaces"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -110,8 +115,14 @@ func runServe() error {
 		return err
 	}
 
+	agentTLS, err := tlsutil.ClientConfig(cfg.TLS.CA, cfg.TLS.Cert, cfg.TLS.Key, "hearth-agent")
+	if err != nil {
+		return err
+	}
+	wsSvc := workspaces.NewService(st.Queries(), reg, agentDialer{tls: agentTLS}, cfg.Workspace, logger)
+
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, reg, authH).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, reg, authH, wsSvc).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)
@@ -152,6 +163,14 @@ func runServe() error {
 		}
 	})
 	return g.Wait()
+}
+
+// agentDialer is the production workspaces.Dialer: it opens an mTLS Agent
+// client to the agent at addr.
+type agentDialer struct{ tls *tls.Config }
+
+func (d agentDialer) Dial(addr string) (hv1.AgentClient, io.Closer, error) {
+	return agentclient.Dial(addr, d.tls)
 }
 
 // storeAgentPersistence adapts *store.Store to grpcserver.AgentPersistence.

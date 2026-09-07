@@ -11,6 +11,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	"github.com/dayski-47/hearth/gateway/internal/store"
+	"github.com/dayski-47/hearth/gateway/internal/workspaces"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -22,10 +23,14 @@ type Server struct {
 	// workspace placement in Plan 2.
 	reg  *agentregistry.Registry
 	auth *auth.Handlers
+	ws   *workspaceHandlers
 }
 
-func New(cfg *config.Config, st *store.Store, logger *slog.Logger, reg *agentregistry.Registry, authH *auth.Handlers) *Server {
-	return &Server{cfg: cfg, st: st, logger: logger, reg: reg, auth: authH}
+func New(cfg *config.Config, st *store.Store, logger *slog.Logger, reg *agentregistry.Registry, authH *auth.Handlers, wsSvc *workspaces.Service) *Server {
+	return &Server{
+		cfg: cfg, st: st, logger: logger, reg: reg, auth: authH,
+		ws: &workspaceHandlers{svc: wsSvc, logger: logger},
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -48,6 +53,14 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.auth.RequireSession())
 		r.Post("/auth/logout", s.auth.Logout)
 		r.Get("/auth/me", s.auth.Me)
+		r.Route("/workspaces", func(r chi.Router) {
+			r.Post("/", s.ws.create)
+			r.Get("/", s.ws.list)
+			r.Get("/{id}", s.ws.get)
+			r.Post("/{id}/start", s.ws.start)
+			r.Post("/{id}/stop", s.ws.stop)
+			r.Delete("/{id}", s.ws.destroy)
+		})
 	})
 	return r
 }

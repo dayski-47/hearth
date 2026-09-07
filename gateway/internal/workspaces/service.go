@@ -225,29 +225,39 @@ func (s *Service) drive(ctx context.Context, ownerID, id pgtype.UUID, kind strin
 	if err != nil {
 		return gen.Workspace{}, ErrNotFound
 	}
+
+	// fail parks the row in "error" and returns the row with a matching State,
+	// so the caller (and the HTTP 502 body) sees "error", not the stale
+	// pre-transition state. Mirrors Create's fail() closure.
+	fail := func(reason string) (gen.Workspace, error) {
+		err := s.parkErr(ctx, id, reason)
+		ws.State = "error"
+		return ws, err
+	}
+
 	if ws.AgentID == nil {
-		return ws, s.parkErr(ctx, id, "workspace has no agent")
+		return fail("workspace has no agent")
 	}
 	addr, ok := s.reg.Addr(*ws.AgentID)
 	if !ok {
-		return ws, s.parkErr(ctx, id, "agent "+*ws.AgentID+" not in registry")
+		return fail("agent " + *ws.AgentID + " not in registry")
 	}
 	client, closer, derr := s.dial.Dial(addr)
 	if derr != nil {
-		return ws, s.parkErr(ctx, id, "dial agent: "+derr.Error())
+		return fail("dial agent: " + derr.Error())
 	}
 	defer closer.Close()
 
 	resp, cerr := call(client)
 	if cerr != nil {
-		return ws, s.parkErr(ctx, id, "agent "+kind+": "+cerr.Error())
+		return fail("agent " + kind + ": " + cerr.Error())
 	}
 	want, known := map[hv1.WorkspaceState]string{
 		hv1.WorkspaceState_RUNNING: "running",
 		hv1.WorkspaceState_STOPPED: "stopped",
 	}[resp.State]
 	if !known {
-		return ws, s.parkErr(ctx, id, "agent "+kind+" reported "+resp.State.String()+": "+resp.Message)
+		return fail("agent " + kind + " reported " + resp.State.String() + ": " + resp.Message)
 	}
 	if err := s.st.SetWorkspaceState(ctx, gen.SetWorkspaceStateParams{ID: id, State: want}); err != nil {
 		return gen.Workspace{}, err
