@@ -114,8 +114,8 @@ async fn shell_round_trip_over_exec() {
             .terminal_exit_code(&handle.id)
             .await
             .map_err(|e| format!("exit code: {e:#}"))?;
-        if code != 0 {
-            return Err(format!("shell exited with {code}, expected 0"));
+        if code != Some(0) {
+            return Err(format!("shell exited with {code:?}, expected Some(0)"));
         }
         Ok(())
     }

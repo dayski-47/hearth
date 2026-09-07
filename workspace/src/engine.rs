@@ -107,9 +107,9 @@ impl PodmanExec {
         Ok(())
     }
 
-    /// The exit code of a finished exec; 0 if the engine did not report one.
-    pub async fn terminal_exit_code(&self, id: &str) -> Result<i32> {
+    /// The exit code of a finished exec, or `None` while it is still running.
+    pub async fn terminal_exit_code(&self, id: &str) -> Result<Option<i32>> {
         let inspect = self.docker.inspect_exec(id).await.context("inspect exec")?;
-        Ok(inspect.exit_code.unwrap_or(0) as i32)
+        Ok(inspect.exit_code.map(|c| c as i32))
     }
 }

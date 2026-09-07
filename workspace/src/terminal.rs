@@ -65,6 +65,13 @@ pub async fn open(
 
     let (tx, rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(64);
 
+    // The handshake goes out before any output so a client never sees shell
+    // bytes ahead of the ready frame. Nothing is spawned yet, so an early
+    // return here leaks no task.
+    tx.send(frame(ServerMsg::Ready(TerminalReady { session_id })))
+        .await
+        .map_err(|_| Status::internal("client hung up"))?;
+
     // exec stdout -> server frames; when the stream ends, the exit code.
     let out_tx = tx.clone();
     let mut output = handle.output;
@@ -93,6 +100,8 @@ pub async fn open(
         let code = exec_for_exit
             .terminal_exit_code(&exec_id_for_exit)
             .await
+            .ok()
+            .flatten()
             .unwrap_or(-1);
         let _ = out_tx
             .send(frame(ServerMsg::Exit(TerminalExit {
@@ -134,10 +143,6 @@ pub async fn open(
         }
         let _ = input.shutdown().await;
     });
-
-    tx.send(frame(ServerMsg::Ready(TerminalReady { session_id })))
-        .await
-        .map_err(|_| Status::internal("client hung up"))?;
 
     Ok(Response::new(ReceiverStream::new(rx)))
 }
