@@ -5,8 +5,9 @@ at a server you control, open a URL from any device, and log in to a real Linux
 terminal and editor running inside an isolated container on that server. There
 is nothing to install on the machine you are sitting at.
 
-> **Status:** early development, in progress. The pieces listed below work, but
-> there is no usable browser UI yet, so Hearth is not ready for real use.
+> **Status:** early development, in progress. The pieces listed below work and
+> there is a bare browser page that logs in and opens a terminal, but the real
+> UI is not built and Hearth is not ready for daily use.
 
 ## Key features
 
@@ -14,8 +15,8 @@ is nothing to install on the machine you are sitting at.
   all capabilities dropped, a read-only root filesystem, a user-namespace
   mapping, CPU, memory and PID limits, an egress-only network, and a persistent
   volume.
-- **Browser terminal.** A `podman exec` PTY streamed to the browser over one
-  authenticated, origin-checked WebSocket.
+- **Browser terminal.** A `podman exec` PTY streamed to a real xterm.js
+  terminal in the browser over one authenticated, origin-checked WebSocket.
 - **Control plane and data plane are separate.** A stateless Go gateway holds
   the database and the API; small per-host Rust services own the container
   runtime. A bug in terminal handling cannot take down auth or the database.
@@ -31,7 +32,7 @@ is nothing to install on the machine you are sitting at.
 - **Gateway:** Go, chi, pgx, sqlc, goose, Postgres, `log/slog`.
 - **Data plane:** Rust, tokio, tonic, bollard, rootless Podman.
 - **Between services:** gRPC and protobuf over mutual TLS.
-- **Frontend (planned):** xterm.js, then a React editor.
+- **Frontend:** a bare vanilla xterm.js page today; a React editor later.
 
 ## How it fits together
 
@@ -40,7 +41,8 @@ data-plane line:
 
 - **`hearth-gateway`** (Go) is the only service a browser talks to. It owns the
   Postgres database, handles login and sessions, tracks which worker hosts are
-  alive, exposes the REST API, and proxies terminal traffic to the data plane.
+  alive, serves the web page, exposes the REST API, and proxies terminal
+  traffic to the data plane.
 - **`hearth-agent`** (Rust) runs on every worker host. It is the only thing that
   creates, starts, stops, and destroys workspace containers there, under a
   hardened rootless-Podman profile.
@@ -54,7 +56,7 @@ data-plane line:
 - [x] Admin login, sessions, CSRF, per-IP login rate limiting
 - [x] Workspace lifecycle over the REST API, with a reconciliation loop
 - [x] Terminal transport: a gateway WebSocket bridged to a container PTY
-- [ ] A terminal page in the browser
+- [x] A bare browser page: log in, pick a workspace, get a terminal
 - [ ] File tree, editor, and live file-change events
 - [ ] Reconnect and session resume
 - [ ] `docker-compose` and Caddy deploy, a pinned workspace image, CI golden path
