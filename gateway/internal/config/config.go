@@ -39,6 +39,7 @@ type Config struct {
 	DatabaseURL       string
 	GRPCListenAddr    string
 	HostID            string
+	WebDir            string
 	// TrustedProxies are the peers whose X-Forwarded-For header may be
 	// believed. Empty means the gateway is reached directly and the header is
 	// ignored entirely.
@@ -58,6 +59,7 @@ func Load() (*Config, error) {
 		DatabaseURL:       req(m, "DATABASE_URL"),
 		GRPCListenAddr:    req(m, "HEARTH_GRPC_LISTEN_ADDR"),
 		HostID:            reqDefault("HEARTH_HOST_ID", "local"),
+		WebDir:            reqDefault("HEARTH_WEB_DIR", "web"),
 		TLS: TLSPaths{
 			CA:   req(m, "HEARTH_TLS_CA"),
 			Cert: req(m, "HEARTH_TLS_CERT"),

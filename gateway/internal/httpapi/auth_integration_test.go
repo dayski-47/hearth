@@ -21,7 +21,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func newTestServer(t *testing.T) (*httptest.Server, string) {
+func newTestServer(t *testing.T, webDir string) (*httptest.Server, string) {
 	t.Helper()
 	ctx := context.Background()
 	pg, err := tcpostgres.Run(ctx, "postgres:16",
@@ -61,6 +61,7 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 		SessionSecret:     []byte("0123456789abcdef0123456789abcdef"),
 		AdminUser:         "admin",
 		AdminPasswordHash: hash,
+		WebDir:            webDir,
 	}
 	mgr := auth.NewManager(st.Queries(), cfg.SessionSecret, logger)
 	authH := auth.NewHandlers(mgr, st.Queries(), mgr, auth.Config{
@@ -73,7 +74,7 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 }
 
 func TestAuthEndToEnd(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _ := newTestServer(t, "")
 	c := srv.Client()
 
 	// login without the CSRF header -> 403, before any credential is checked

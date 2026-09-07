@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/dayski-47/hearth/gateway/internal/auth"
@@ -70,7 +72,30 @@ func (s *Server) Handler() http.Handler {
 			})
 		}
 	})
+
+	webDir := s.cfg.WebDir
+	if webDir == "" {
+		webDir = "web"
+	}
+	fs := http.FileServer(http.Dir(webDir))
+	r.Handle("/*", spaFallback(webDir, fs))
+
 	return r
+}
+
+// spaFallback serves the requested path if it names a real file under dir,
+// otherwise index.html, so a browser refresh on a client-side route still
+// loads the app. Chi matches /healthz and /api/* first, so those never reach
+// here.
+func spaFallback(dir string, fs http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+	}
 }
 
 func (s *Server) Run(ctx context.Context) error {

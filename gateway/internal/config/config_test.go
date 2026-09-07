@@ -43,6 +43,30 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
+func TestLoadWebDir(t *testing.T) {
+	env := validEnv()
+	env["HEARTH_WEB_DIR"] = "/srv/web"
+	setEnv(t, env)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WebDir != "/srv/web" {
+		t.Fatalf("WebDir = %q, want /srv/web", c.WebDir)
+	}
+}
+
+func TestLoadWebDirDefault(t *testing.T) {
+	setEnv(t, validEnv())
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WebDir != "web" {
+		t.Fatalf("WebDir = %q, want web", c.WebDir)
+	}
+}
+
 func TestLoadMissingRequired(t *testing.T) {
 	env := validEnv()
 	delete(env, "DATABASE_URL")
