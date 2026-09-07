@@ -70,6 +70,8 @@ async fn try_connect_and_register(
             host_id: cfg.host_id.clone(),
             advertise_addr: cfg.advertise_addr.clone(),
             capacity: None,
+            // Left empty until the agent runs a workspace service to advertise.
+            workspace_addr: String::new(),
         })
         .await?
         .into_inner();

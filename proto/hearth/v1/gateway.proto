@@ -12,6 +12,7 @@ message RegisterRequest {
   string host_id = 1;
   string advertise_addr = 2;
   Capacity capacity = 3;
+  string workspace_addr = 4;
 }
 message RegisterResponse {
   uint32 heartbeat_interval_seconds = 1;

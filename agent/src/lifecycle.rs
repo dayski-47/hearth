@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use hearth_common::workspace_container_name;
 use hearth_proto::hearth::v1::{CreateWorkspaceRequest, Workspace, WorkspaceState};
 
 use crate::engine::{
@@ -16,15 +17,6 @@ pub struct Lifecycle<E: ContainerEngine> {
 
 pub fn new<E: ContainerEngine>(engine: Arc<E>, host_id: String) -> Lifecycle<E> {
     Lifecycle { engine, host_id }
-}
-
-fn container_name(id: &str) -> String {
-    format!("hearth-ws-{id}")
-}
-// The volume shares the workspace id with the container by design: exactly one
-// volume per workspace, mounted at /workspace, removed with it.
-fn volume_name(id: &str) -> String {
-    format!("hearth-ws-{id}")
 }
 
 impl<E: ContainerEngine> Lifecycle<E> {
@@ -64,9 +56,12 @@ impl<E: ContainerEngine> Lifecycle<E> {
         };
         let limits = req.limits.unwrap_or_default();
         let spec = WorkspaceContainerSpec {
-            name: container_name(id),
+            name: workspace_container_name(id),
             image: req.image.clone(),
-            volume: volume_name(id),
+            // The volume shares the workspace id with the container by design:
+            // exactly one volume per workspace, mounted at /workspace, removed
+            // with it.
+            volume: workspace_container_name(id),
             network: network.clone(),
             userns: req.userns.clone(),
             cpu_millis: limits.cpu_millis,
@@ -77,22 +72,24 @@ impl<E: ContainerEngine> Lifecycle<E> {
         if matches!(network, NetworkMode::Egress) {
             self.engine.ensure_network(EGRESS_NETWORK).await?;
         }
-        self.engine.create_volume(&volume_name(id)).await?;
+        self.engine
+            .create_volume(&workspace_container_name(id))
+            .await?;
         let cid = self.engine.create_container(spec).await?;
-        self.engine.start(&container_name(id)).await?;
+        self.engine.start(&workspace_container_name(id)).await?;
         tracing::info!(workspace_id = %id, container_id = %cid, "workspace running");
         Ok(cid)
     }
 
     pub async fn start(&self, id: &str) -> Workspace {
-        match self.engine.start(&container_name(id)).await {
+        match self.engine.start(&workspace_container_name(id)).await {
             Ok(()) => self.get(id).await,
             Err(e) => self.errored(id, e),
         }
     }
 
     pub async fn stop(&self, id: &str) -> Workspace {
-        match self.engine.stop(&container_name(id)).await {
+        match self.engine.stop(&workspace_container_name(id)).await {
             Ok(()) => {
                 tracing::info!(workspace_id = %id, "workspace stopped");
                 self.ok(id, String::new(), WorkspaceState::Stopped)
@@ -102,14 +99,20 @@ impl<E: ContainerEngine> Lifecycle<E> {
     }
 
     pub async fn destroy(&self, id: &str) -> Result<()> {
-        self.engine.remove(&container_name(id)).await?;
-        self.engine.remove_volume(&volume_name(id)).await?;
+        self.engine.remove(&workspace_container_name(id)).await?;
+        self.engine
+            .remove_volume(&workspace_container_name(id))
+            .await?;
         tracing::info!(workspace_id = %id, "workspace destroyed");
         Ok(())
     }
 
     pub async fn get(&self, id: &str) -> Workspace {
-        match self.engine.inspect_state(&container_name(id)).await {
+        match self
+            .engine
+            .inspect_state(&workspace_container_name(id))
+            .await
+        {
             Ok(ContainerRunState::Running) => self.ok(id, String::new(), WorkspaceState::Running),
             Ok(ContainerRunState::Stopped) => self.ok(id, String::new(), WorkspaceState::Stopped),
             Ok(ContainerRunState::Missing) => Workspace {
