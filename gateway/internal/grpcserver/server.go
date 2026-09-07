@@ -28,7 +28,7 @@ const agentLeafCN = "hearth-agent"
 // after updating the in-memory registry. The registry is the hot path; a
 // persistence error is logged, not fatal.
 type AgentPersistence interface {
-	UpsertAgent(ctx context.Context, id, advertiseAddr string, cap agentregistry.Capacity) error
+	UpsertAgent(ctx context.Context, id, advertiseAddr, workspaceAddr string, cap agentregistry.Capacity) error
 	TouchHeartbeat(ctx context.Context, id string) error
 	SetStatus(ctx context.Context, id, status string) error
 }
@@ -70,10 +70,10 @@ func (c *control) RegisterAgent(ctx context.Context, req *hv1.RegisterRequest) (
 		capacity.CPUMillis = pc.GetCpuMillis()
 		capacity.MemoryBytes = pc.GetMemoryBytes()
 	}
-	if err := c.reg.Register(ctx, req.GetHostId(), req.GetAdvertiseAddr(), capacity); err != nil {
+	if err := c.reg.Register(ctx, req.GetHostId(), req.GetAdvertiseAddr(), req.GetWorkspaceAddr(), capacity); err != nil {
 		return nil, status.Error(codes.Internal, "register agent failed")
 	}
-	if err := c.store.UpsertAgent(ctx, req.GetHostId(), req.GetAdvertiseAddr(), capacity); err != nil {
+	if err := c.store.UpsertAgent(ctx, req.GetHostId(), req.GetAdvertiseAddr(), req.GetWorkspaceAddr(), capacity); err != nil {
 		c.log().WarnContext(ctx, "persist agent registration failed",
 			"request_id", reqid.FromContext(ctx), "host_id", req.GetHostId(), "error", err)
 	}

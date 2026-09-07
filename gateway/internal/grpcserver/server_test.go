@@ -36,7 +36,7 @@ const (
 
 type noopPersistence struct{}
 
-func (noopPersistence) UpsertAgent(context.Context, string, string, agentregistry.Capacity) error {
+func (noopPersistence) UpsertAgent(context.Context, string, string, string, agentregistry.Capacity) error {
 	return nil
 }
 func (noopPersistence) TouchHeartbeat(context.Context, string) error { return nil }
@@ -234,6 +234,7 @@ func TestRegisterAndHeartbeatOverMTLS(t *testing.T) {
 	if _, err := c.RegisterAgent(ctx, &hv1.RegisterRequest{
 		HostId:        "h1",
 		AdvertiseAddr: "https://localhost:9091",
+		WorkspaceAddr: "https://localhost:9092",
 		Capacity:      &hv1.Capacity{CpuMillis: 4000, MemoryBytes: 1 << 30},
 	}); err != nil {
 		t.Fatal(err)
@@ -247,6 +248,9 @@ func TestRegisterAndHeartbeatOverMTLS(t *testing.T) {
 	}
 	if got[0].Capacity.CPUMillis != 4000 {
 		t.Fatalf("capacity not propagated: %+v", got[0].Capacity)
+	}
+	if ws, ok := reg.WorkspaceAddr("h1"); !ok || ws != "https://localhost:9092" {
+		t.Fatalf("workspace addr not propagated: %q %v", ws, ok)
 	}
 }
 

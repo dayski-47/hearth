@@ -433,13 +433,13 @@ func (d agentDialer) Dial(addr string) (hv1.AgentClient, io.Closer, error) {
 
 type storePersistence struct{ st *store.Store }
 
-func (p storePersistence) UpsertAgent(ctx context.Context, id, advertiseAddr string, capacity agentregistry.Capacity) error {
+func (p storePersistence) UpsertAgent(ctx context.Context, id, advertiseAddr, workspaceAddr string, capacity agentregistry.Capacity) error {
 	raw, err := json.Marshal(capacity)
 	if err != nil {
 		return err
 	}
 	_, err = p.st.Queries().UpsertAgent(ctx, gen.UpsertAgentParams{
-		ID: id, AdvertiseAddr: advertiseAddr, Capacity: raw,
+		ID: id, AdvertiseAddr: advertiseAddr, WorkspaceAddr: workspaceAddr, Capacity: raw,
 	})
 	return err
 }

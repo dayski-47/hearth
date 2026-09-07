@@ -8,10 +8,11 @@ RETURNING *;
 SELECT * FROM users WHERE username = $1;
 
 -- name: UpsertAgent :one
-INSERT INTO agents (id, advertise_addr, capacity, status, last_heartbeat_at)
-VALUES ($1, $2, $3, 'ready', now())
+INSERT INTO agents (id, advertise_addr, workspace_addr, capacity, status, last_heartbeat_at)
+VALUES ($1, $2, $3, $4, 'ready', now())
 ON CONFLICT (id) DO UPDATE
    SET advertise_addr = EXCLUDED.advertise_addr,
+       workspace_addr = EXCLUDED.workspace_addr,
        capacity = EXCLUDED.capacity,
        status = 'ready',
        last_heartbeat_at = now()

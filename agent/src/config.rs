@@ -13,6 +13,7 @@ pub struct Config {
     pub grpc_listen_addr: String,
     pub gateway_grpc_addr: String,
     pub advertise_addr: String,
+    pub workspace_addr: String,
     pub podman_socket: Option<String>,
     pub tls: TlsPaths,
 }
@@ -27,6 +28,7 @@ pub fn load() -> Result<Config> {
         grpc_listen_addr: req("HEARTH_AGENT_GRPC_LISTEN_ADDR")?,
         gateway_grpc_addr: req("HEARTH_GATEWAY_GRPC_ADDR")?,
         advertise_addr: req("HEARTH_AGENT_ADDR")?,
+        workspace_addr: req("HEARTH_WORKSPACE_ADDR")?,
         podman_socket: std::env::var("HEARTH_PODMAN_SOCKET")
             .ok()
             .filter(|s| !s.is_empty()),
@@ -49,6 +51,7 @@ mod tests {
         std::env::remove_var("HEARTH_GATEWAY_GRPC_ADDR");
         std::env::set_var("HEARTH_AGENT_GRPC_LISTEN_ADDR", "0.0.0.0:9091");
         std::env::set_var("HEARTH_AGENT_ADDR", "https://localhost:9091");
+        std::env::set_var("HEARTH_WORKSPACE_ADDR", "https://localhost:9092");
         std::env::set_var("HEARTH_TLS_CA", "ca.pem");
         std::env::set_var("HEARTH_AGENT_TLS_CERT", "a.pem");
         std::env::set_var("HEARTH_AGENT_TLS_KEY", "a-key.pem");

@@ -16,6 +16,7 @@ type Capacity struct {
 type Agent struct {
 	ID            string
 	AdvertiseAddr string
+	WorkspaceAddr string
 	Capacity      Capacity
 	Status        string // ready | draining | lost
 	LastHeartbeat time.Time
@@ -43,11 +44,11 @@ func NewInMemoryWithClock(now func() time.Time) *Registry {
 	return &Registry{agents: map[string]*Agent{}, now: now}
 }
 
-func (r *Registry) Register(_ context.Context, id, addr string, capacity Capacity) error {
+func (r *Registry) Register(_ context.Context, id, addr, workspaceAddr string, capacity Capacity) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.agents[id] = &Agent{
-		ID: id, AdvertiseAddr: addr, Capacity: capacity,
+		ID: id, AdvertiseAddr: addr, WorkspaceAddr: workspaceAddr, Capacity: capacity,
 		Status: "ready", LastHeartbeat: r.now(),
 	}
 	return nil
@@ -57,11 +58,11 @@ func (r *Registry) Register(_ context.Context, id, addr string, capacity Capacit
 // without the "ready"/now() override that Register applies. The boot rebuild
 // uses it so a host persisted as "lost" stays lost (and un-Pick-able) until it
 // actually heartbeats again.
-func (r *Registry) Restore(id, addr, status string, capacity Capacity, lastHeartbeat time.Time) {
+func (r *Registry) Restore(id, addr, workspaceAddr, status string, capacity Capacity, lastHeartbeat time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.agents[id] = &Agent{
-		ID: id, AdvertiseAddr: addr, Capacity: capacity,
+		ID: id, AdvertiseAddr: addr, WorkspaceAddr: workspaceAddr, Capacity: capacity,
 		Status: status, LastHeartbeat: lastHeartbeat,
 	}
 }
@@ -114,6 +115,19 @@ func (r *Registry) Addr(id string) (string, bool) {
 		return "", false
 	}
 	return a.AdvertiseAddr, true
+}
+
+// WorkspaceAddr returns the address of the co-located workspace service on the
+// agent with the given id, and whether that agent is known to the registry. The
+// terminal proxy uses it to reach the workspace service on a chosen host.
+func (r *Registry) WorkspaceAddr(id string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.agents[id]
+	if !ok {
+		return "", false
+	}
+	return a.WorkspaceAddr, true
 }
 
 // LostAgents returns the ids of every agent currently marked "lost". The

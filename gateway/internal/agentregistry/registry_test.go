@@ -14,10 +14,22 @@ func TestPickAfterRegister(t *testing.T) {
 	if _, err := r.Pick(ctx); err == nil {
 		t.Fatal("expected error with no agents")
 	}
-	_ = r.Register(ctx, "h1", "https://localhost:9091", agentregistry.Capacity{CPUMillis: 4000})
+	_ = r.Register(ctx, "h1", "https://localhost:9091", "", agentregistry.Capacity{CPUMillis: 4000})
 	a, err := r.Pick(ctx)
 	if err != nil || a.ID != "h1" {
 		t.Fatalf("pick: %v %+v", err, a)
+	}
+}
+
+func TestWorkspaceAddrLookup(t *testing.T) {
+	r := agentregistry.NewInMemory()
+	_ = r.Register(context.Background(), "h1", "https://h1:9091", "https://h1:9092", agentregistry.Capacity{})
+	got, ok := r.WorkspaceAddr("h1")
+	if !ok || got != "https://h1:9092" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+	if _, ok := r.WorkspaceAddr("nope"); ok {
+		t.Fatal("unknown host should miss")
 	}
 }
 
@@ -28,7 +40,7 @@ func TestAddrLooksUpByID(t *testing.T) {
 	if _, ok := r.Addr("h1"); ok {
 		t.Fatal("expected miss for unknown agent")
 	}
-	_ = r.Register(ctx, "h1", "https://localhost:9091", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h1", "https://localhost:9091", "", agentregistry.Capacity{})
 	addr, ok := r.Addr("h1")
 	if !ok || addr != "https://localhost:9091" {
 		t.Fatalf("Addr = %q %v, want the advertise addr", addr, ok)
@@ -40,8 +52,8 @@ func TestLostAgentsListsOnlyLost(t *testing.T) {
 	base := time.Now()
 	r := agentregistry.NewInMemoryWithClock(func() time.Time { return base })
 
-	_ = r.Register(ctx, "h1", "addr1", agentregistry.Capacity{})
-	_ = r.Register(ctx, "h2", "addr2", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h1", "addr1", "", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h2", "addr2", "", agentregistry.Capacity{})
 	if lost := r.LostAgents(); len(lost) != 0 {
 		t.Fatalf("expected no lost agents, got %v", lost)
 	}
@@ -69,7 +81,7 @@ func TestSweepMarksStaleLost(t *testing.T) {
 	r := agentregistry.NewInMemoryWithClock(func() time.Time { return clk })
 
 	// ready
-	_ = r.Register(ctx, "h1", "addr", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h1", "addr", "", agentregistry.Capacity{})
 	if _, err := r.Pick(ctx); err != nil {
 		t.Fatalf("expected h1 ready after register: %v", err)
 	}
@@ -97,7 +109,7 @@ func TestRestorePreservesLostStatus(t *testing.T) {
 	r := agentregistry.NewInMemory()
 	old := time.Now().Add(-time.Hour)
 
-	r.Restore("h1", "addr", "lost", agentregistry.Capacity{}, old)
+	r.Restore("h1", "addr", "", "lost", agentregistry.Capacity{}, old)
 	if _, err := r.Pick(ctx); err == nil {
 		t.Fatal("a restored lost agent must not be Pick-able")
 	}
@@ -114,7 +126,7 @@ func TestRestorePreservesLostStatus(t *testing.T) {
 func TestSweepReturnsLostIDs(t *testing.T) {
 	r := agentregistry.NewInMemory()
 	ctx := context.Background()
-	_ = r.Register(ctx, "h1", "addr", agentregistry.Capacity{})
+	_ = r.Register(ctx, "h1", "addr", "", agentregistry.Capacity{})
 	base := time.Now()
 	lost := r.Sweep(ctx, base.Add(31*time.Second), 30*time.Second)
 	if len(lost) != 1 || lost[0] != "h1" {
