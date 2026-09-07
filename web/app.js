@@ -64,7 +64,7 @@ async function refreshList() {
 let term, fit, sock;
 function attach(id) {
   if (!id) return;
-  if (sock) { sock.onclose = null; sock.close(); }
+  if (sock) { sock.onclose = null; sock.onmessage = null; sock.close(); }
   if (!term) {
     term = new Terminal({ cursorBlink: true, fontSize: 13 });
     fit = new FitAddon.FitAddon();
