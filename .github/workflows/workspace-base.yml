@@ -53,9 +53,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: deploy/images/workspace-base
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
+      - name: Push the scanned image
+        run: |
+          while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            docker tag hearth-workspace-base:scan "$ref"
+            docker push "$ref"
+          done <<< "${{ steps.tags.outputs.tags }}"
