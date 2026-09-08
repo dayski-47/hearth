@@ -20,6 +20,11 @@ without reaching the network to install a compiler or a package manager.
 The default user is `hearth` (uid 1000) and the workspace volume mounts at
 `/workspace`.
 
+A workspace runs with a read-only root filesystem, so every toolchain cache and
+install directory (`CARGO_HOME`, `GOPATH`, `GOCACHE`, the npm and pip caches) is
+pointed at `/workspace`. They are created on first use, work under the read-only
+root, and persist across a workspace restart.
+
 ## Build locally
 
 ```
@@ -43,6 +48,11 @@ git push origin workspace-base-v<n>
 
 The `workspace-base` workflow builds the image, scans it with Trivy, and pushes
 `ghcr.io/dayski-47/hearth-workspace-base:v<n>` and `:latest`.
+
+The first push creates the GHCR package. A package created by the workflow's
+`GITHUB_TOKEN` is private by default, so an anonymous `docker pull` of it will
+fail with "denied". After the first successful publish, open the package in the
+repository's Packages settings and change its visibility to public.
 
 ## Using a different image
 
