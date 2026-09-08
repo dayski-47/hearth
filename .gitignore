@@ -10,3 +10,4 @@
 /deploy/certs/*.pem
 /deploy/certs/*.srl
 /bin/
+/.superpowers/
