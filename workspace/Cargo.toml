@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-hearth-proto = { path = "../crates/hearth-proto" }
-hearth-common = { path = "../crates/hearth-common" }
+hearth-proto = { path = "../crates/hearth-proto", version = "0.0.0" }
+hearth-common = { path = "../crates/hearth-common", version = "0.0.0" }
 tokio = { workspace = true, features = ["io-util"] }
 tonic.workspace = true
 tracing.workspace = true
