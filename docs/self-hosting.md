@@ -127,7 +127,7 @@ Every workspace starts from one OCI image, named by `HEARTH_WORKSPACE_IMAGE`
 in `.env`. A fresh `.env` sets it to
 `ghcr.io/dayski-47/hearth-workspace-base:latest`. That image is built from
 `deploy/images/workspace-base/`; its [`README.md`](../deploy/images/workspace-base/README.md)
-lists what is baked in and how new versions are cut. Publishing is tag driven:
+lists what is baked in and how new versions are cut. Publishing is tag-driven:
 pushing a `workspace-base-v*` git tag runs a workflow that builds the image,
 scans it with Trivy, and pushes it to `ghcr.io/dayski-47/hearth-workspace-base`
 as both `:v<n>` and `:latest`. A real image sits at that path only once such a
@@ -139,8 +139,13 @@ Go, Rust, Node, and Python are all baked in so a workspace is usable without
 reaching the network. If your workspaces always have network access, a slim
 image such as `docker.io/library/debian:stable` is fine.
 
+Python on the base image follows Debian 12's PEP 668 rule: `pip install`
+outside a virtualenv is refused, so use `python3 -m venv` or pass
+`--break-system-packages` when you mean to install into the system Python.
+
 To build and extend it yourself, copy
-`deploy/images/workspace-base/Dockerfile`, add the tools you want, and build it:
+`deploy/images/workspace-base/Dockerfile`, add the tools you want, and build it
+from the directory holding your copied Dockerfile:
 
 ```
 docker build -t my-workspace-base .
