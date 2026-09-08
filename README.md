@@ -71,6 +71,6 @@ image, network lockdown).
 - [x] File operations: list, read, write, create, rename, delete, over REST
 - [x] Live file-change events streamed to the browser over a WebSocket
 - [x] `docker-compose` and Caddy deploy on a single host
+- [x] A pinned workspace base image and dependency, secret, and image scanning in CI
 - [ ] A file tree and an editor
 - [ ] Reconnect and session resume
-- [ ] A pinned workspace base image and CI security scanning
