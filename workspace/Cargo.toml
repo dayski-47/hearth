@@ -16,6 +16,8 @@ anyhow.workspace = true
 futures-util = "0.3"
 bytes = "1"
 tokio-stream = "0.1"
+rustix = { version = "1", features = ["fs"] }
+rand = "0.8"
 
 [lib]
 name = "hearth_workspace"
@@ -26,3 +28,4 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tokio = { version = "1.40", features = ["test-util", "macros", "rt-multi-thread"] }
+tempfile = "3"

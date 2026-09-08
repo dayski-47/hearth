@@ -1,5 +1,6 @@
 pub mod config;
 pub mod engine;
+pub mod files;
 pub mod grpc;
 pub mod terminal;
 pub mod tls;
