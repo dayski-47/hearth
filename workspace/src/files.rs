@@ -11,11 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use bollard::Docker;
-use hearth_proto::hearth::v1::{FileChunk, Node};
-use rustix::fs::{Mode, OFlags, ResolveFlags};
+use futures_util::StreamExt;
+use hearth_proto::hearth::v1::write_file_frame::Msg as WriteMsg;
+use hearth_proto::hearth::v1::{FileChunk, Node, WriteFileFrame};
+use rustix::fs::{AtFlags, Mode, OFlags, ResolveFlags};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::Status;
+use tonic::{Status, Streaming};
 
 /// Filesystem operations for one host's workspaces. Cheap to clone the docker
 /// handle into; the mount-point cache is shared behind a mutex.
@@ -86,10 +88,20 @@ impl Files {
         tokio::task::spawn_blocking(move || {
             let mut f = file;
             let mut buf = vec![0u8; 64 * 1024];
+            // The fstat cap was checked before the first read, but the file can
+            // grow underneath us; hold the same limit against what we actually send.
+            let mut sent: u64 = 0;
             loop {
                 match f.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        sent += n as u64;
+                        if sent > cap {
+                            let _ = tx.blocking_send(Err(Status::invalid_argument(
+                                "file exceeded the size limit while reading",
+                            )));
+                            break;
+                        }
                         if tx
                             .blocking_send(Ok(FileChunk {
                                 data: buf[..n].to_vec(),
@@ -107,6 +119,107 @@ impl Files {
             }
         });
         Ok(ReceiverStream::new(rx))
+    }
+
+    /// Consume a `WriteFile` client stream: the first frame carries the target,
+    /// every frame after it carries bytes. The bytes land in a temp file in the
+    /// destination directory that is renamed over the destination at the end, so
+    /// a crash or a dropped connection leaves either the old file or the new one,
+    /// never a half-written mix. Returns the number of bytes written.
+    pub async fn write_file(&self, mut stream: Streaming<WriteFileFrame>) -> Result<u64, Status> {
+        let init = match stream.next().await {
+            Some(Ok(WriteFileFrame {
+                msg: Some(WriteMsg::Init(i)),
+            })) => i,
+            Some(Ok(_)) => return Err(Status::invalid_argument("first frame must be init")),
+            Some(Err(e)) => return Err(Status::internal(format!("client stream: {e}"))),
+            None => return Err(Status::invalid_argument("empty write stream")),
+        };
+        let root = self.root(&init.workspace_id).await?;
+        let rel = clean_rel(&init.path)?;
+        if rel == Path::new(".") {
+            return Err(Status::invalid_argument("cannot write the volume root"));
+        }
+
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
+        let rp = root.clone();
+        let rrel = rel.clone();
+        let writer = tokio::task::spawn_blocking(move || write_atomic_blocking(&rp, &rrel, rx));
+
+        while let Some(frame) = stream.next().await {
+            match frame {
+                Ok(WriteFileFrame {
+                    msg: Some(WriteMsg::Data(d)),
+                }) => {
+                    if tx.send(d).await.is_err() {
+                        break; // the writer died; its Result carries the error
+                    }
+                }
+                Ok(_) => {} // a second init or an empty frame: ignore
+                Err(e) => {
+                    drop(tx);
+                    let _ = writer.await;
+                    return Err(Status::internal(format!("client stream: {e}")));
+                }
+            }
+        }
+        drop(tx);
+        writer
+            .await
+            .map_err(|e| Status::internal(format!("join: {e}")))?
+    }
+
+    /// Create an empty file or a directory at `path`. Fails if something is
+    /// already there.
+    pub async fn create_node(
+        &self,
+        workspace_id: &str,
+        path: &str,
+        is_dir: bool,
+    ) -> Result<Node, Status> {
+        let root = self.root(workspace_id).await?;
+        let rel = clean_rel(path)?;
+        let r2 = rel.clone();
+        tokio::task::spawn_blocking(move || {
+            create_node_blocking(&root, &rel, is_dir)?;
+            node_at(&root, &r2)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("join: {e}")))?
+    }
+
+    /// Remove `path`. A directory is removed with everything under it.
+    pub async fn delete_node(&self, workspace_id: &str, path: &str) -> Result<(), Status> {
+        let root = self.root(workspace_id).await?;
+        let rel = clean_rel(path)?;
+        if rel == Path::new(".") {
+            return Err(Status::invalid_argument("cannot delete the volume root"));
+        }
+        tokio::task::spawn_blocking(move || delete_node_blocking(&root, &rel))
+            .await
+            .map_err(|e| Status::internal(format!("join: {e}")))?
+    }
+
+    /// Move `from` to `to`. Both are resolved beneath the volume root.
+    pub async fn rename_node(
+        &self,
+        workspace_id: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<Node, Status> {
+        let root = self.root(workspace_id).await?;
+        let f = clean_rel(from)?;
+        let t = clean_rel(to)?;
+        if f == Path::new(".") || t == Path::new(".") {
+            return Err(Status::invalid_argument("cannot rename the volume root"));
+        }
+        let (root2, t2) = (root.clone(), t.clone());
+        tokio::task::spawn_blocking(move || {
+            rename_node_blocking(&root, &f, &t)?;
+            node_at(&root2, &t2)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("join: {e}")))?
     }
 }
 
@@ -173,6 +286,9 @@ fn map_open_err(e: rustix::io::Errno) -> Status {
 fn open_file_capped(root: &Path, rel: &Path, cap: u64) -> Result<std::fs::File, Status> {
     let fd = open_beneath(root, rel, OFlags::RDONLY)?;
     let st = rustix::fs::fstat(&fd).map_err(|e| Status::internal(format!("stat: {e}")))?;
+    if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory {
+        return Err(Status::invalid_argument("path is a directory, not a file"));
+    }
     if (st.st_size as u64) > cap {
         return Err(Status::invalid_argument(format!(
             "file is {} bytes, over the {cap} byte limit",
@@ -218,6 +334,180 @@ fn list_dir_blocking(root: &Path, rel: &Path) -> Result<Vec<Node>, Status> {
     }
     out.sort_by(|a, b| (b.is_dir, &a.name).cmp(&(a.is_dir, &b.name)));
     Ok(out)
+}
+
+/// Split `rel` into (parent, file name). `rel` is never `.` here.
+#[allow(clippy::result_large_err)]
+fn split_parent(rel: &Path) -> Result<(PathBuf, &std::ffi::OsStr), Status> {
+    let name = rel
+        .file_name()
+        .ok_or_else(|| Status::invalid_argument("path has no file name"))?;
+    let parent = rel.parent().map(Path::to_path_buf).unwrap_or_default();
+    let parent = if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent
+    };
+    Ok((parent, name))
+}
+
+/// Open the directory that will hold `rel`, and hand back the leaf name to
+/// operate on within it. The parent is reached through `RESOLVE_BENEATH`, so the
+/// leaf operation cannot land outside the volume.
+#[allow(clippy::result_large_err)]
+fn open_parent(root: &Path, rel: &Path) -> Result<(OwnedFd, PathBuf), Status> {
+    let (parent, name) = split_parent(rel)?;
+    let fd = open_beneath(root, &parent, OFlags::RDONLY | OFlags::DIRECTORY)?;
+    Ok((fd, PathBuf::from(name)))
+}
+
+/// Stream `rx` into a temp file next to `rel`, fsync it, and rename it over
+/// `rel`. Any failure unlinks the temp and leaves the destination as it was.
+#[allow(clippy::result_large_err)]
+fn write_atomic_blocking(
+    root: &Path,
+    rel: &Path,
+    mut rx: mpsc::Receiver<Vec<u8>>,
+) -> Result<u64, Status> {
+    use std::io::Write;
+    let (parent_fd, name) = open_parent(root, rel)?;
+    let tmp = format!(
+        ".hearth-tmp-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    );
+
+    let tmp_fd = rustix::fs::openat(
+        &parent_fd,
+        tmp.as_str(),
+        OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::CLOEXEC,
+        Mode::from_raw_mode(0o644),
+    )
+    .map_err(map_open_err)?;
+    let mut file = std::fs::File::from(tmp_fd);
+
+    let cleanup = |err: Status| -> Status {
+        let _ = rustix::fs::unlinkat(&parent_fd, tmp.as_str(), AtFlags::empty());
+        err
+    };
+
+    let mut total: u64 = 0;
+    while let Some(chunk) = rx.blocking_recv() {
+        if let Err(e) = file.write_all(&chunk) {
+            return Err(cleanup(Status::internal(format!("write: {e}"))));
+        }
+        total += chunk.len() as u64;
+    }
+    if let Err(e) = file.sync_all() {
+        return Err(cleanup(Status::internal(format!("fsync: {e}"))));
+    }
+    drop(file);
+    rustix::fs::renameat(&parent_fd, tmp.as_str(), &parent_fd, name.as_os_str())
+        .map_err(|e| cleanup(Status::internal(format!("rename into place: {e}"))))?;
+    Ok(total)
+}
+
+#[allow(clippy::result_large_err)]
+fn create_node_blocking(root: &Path, rel: &Path, is_dir: bool) -> Result<(), Status> {
+    let (parent_fd, name) = open_parent(root, rel)?;
+    if is_dir {
+        rustix::fs::mkdirat(&parent_fd, name.as_os_str(), Mode::from_raw_mode(0o755))
+            .map_err(map_mk_err)
+    } else {
+        let fd = rustix::fs::openat(
+            &parent_fd,
+            name.as_os_str(),
+            OFlags::CREATE | OFlags::EXCL | OFlags::WRONLY | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o644),
+        )
+        .map_err(map_mk_err)?;
+        drop(fd);
+        Ok(())
+    }
+}
+
+fn map_mk_err(e: rustix::io::Errno) -> Status {
+    match e {
+        rustix::io::Errno::EXIST => Status::already_exists("already exists"),
+        other => map_open_err(other),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn delete_node_blocking(root: &Path, rel: &Path) -> Result<(), Status> {
+    let (parent_fd, name) = open_parent(root, rel)?;
+    let st = rustix::fs::statat(&parent_fd, name.as_os_str(), AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(map_open_err)?;
+    if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory {
+        // recurse, then remove the now-empty directory
+        let dir_fd = rustix::fs::openat(
+            &parent_fd,
+            name.as_os_str(),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(map_open_err)?;
+        rmdir_recursive(&dir_fd)?;
+        rustix::fs::unlinkat(&parent_fd, name.as_os_str(), AtFlags::REMOVEDIR).map_err(map_open_err)
+    } else {
+        rustix::fs::unlinkat(&parent_fd, name.as_os_str(), AtFlags::empty()).map_err(map_open_err)
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn rmdir_recursive(dir_fd: &OwnedFd) -> Result<(), Status> {
+    let dir = rustix::fs::Dir::read_from(dir_fd)
+        .map_err(|e| Status::internal(format!("readdir: {e}")))?;
+    for entry in dir {
+        let entry = entry.map_err(|e| Status::internal(format!("readdir: {e}")))?;
+        let name = entry.file_name();
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        let st =
+            rustix::fs::statat(dir_fd, name, AtFlags::SYMLINK_NOFOLLOW).map_err(map_open_err)?;
+        if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory {
+            let child = rustix::fs::openat(
+                dir_fd,
+                name,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                Mode::empty(),
+            )
+            .map_err(map_open_err)?;
+            rmdir_recursive(&child)?;
+            rustix::fs::unlinkat(dir_fd, name, AtFlags::REMOVEDIR).map_err(map_open_err)?;
+        } else {
+            rustix::fs::unlinkat(dir_fd, name, AtFlags::empty()).map_err(map_open_err)?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+fn rename_node_blocking(root: &Path, from: &Path, to: &Path) -> Result<(), Status> {
+    let (from_parent, from_name) = open_parent(root, from)?;
+    let (to_parent, to_name) = open_parent(root, to)?;
+    rustix::fs::renameat(
+        &from_parent,
+        from_name.as_os_str(),
+        &to_parent,
+        to_name.as_os_str(),
+    )
+    .map_err(map_open_err)
+}
+
+#[allow(clippy::result_large_err)]
+fn node_at(root: &Path, rel: &Path) -> Result<Node, Status> {
+    let (parent_fd, name) = open_parent(root, rel)?;
+    let st = rustix::fs::statat(&parent_fd, name.as_os_str(), AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(map_open_err)?;
+    Ok(Node {
+        path: rel.to_string_lossy().into_owned(),
+        name: name.to_string_lossy().into_owned(),
+        is_dir: rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory,
+        size: st.st_size as u64,
+        modified_unix: st.st_mtime as i64,
+    })
 }
 
 #[cfg(test)]
@@ -267,5 +557,49 @@ mod tests {
         let err = open_file_capped(root.path(), Path::new("big"), 1024).unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert!(open_file_capped(root.path(), Path::new("big"), 4096).is_ok());
+    }
+
+    #[test]
+    fn open_file_capped_rejects_a_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let err = open_file_capped(root.path(), Path::new("."), 4096).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::result_large_err)]
+    async fn write_replaces_atomically() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("f"), b"original").unwrap();
+
+        // A clean run replaces "f" in place and leaves no temp file behind.
+        let rp = root.path().to_path_buf();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(2);
+        let h = tokio::task::spawn_blocking(move || write_atomic_blocking(&rp, Path::new("f"), rx));
+        tx.send(b"new".to_vec()).await.unwrap();
+        drop(tx); // clean end -> this one SUCCEEDS; assert it replaced the file
+        let n = h.await.unwrap().unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(std::fs::read(root.path().join("f")).unwrap(), b"new");
+        // no leftover temp files
+        let leftovers: Vec<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".hearth-tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind");
+    }
+
+    #[test]
+    fn node_ops_stay_beneath_root() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(create_node_blocking(root.path(), Path::new("d"), true).is_ok());
+        assert!(create_node_blocking(root.path(), Path::new("d/x.txt"), false).is_ok());
+        assert!(create_node_blocking(root.path(), Path::new("d/x.txt"), false).is_err()); // EEXIST
+        assert!(
+            rename_node_blocking(root.path(), Path::new("d/x.txt"), Path::new("d/y.txt")).is_ok()
+        );
+        assert!(delete_node_blocking(root.path(), Path::new("d")).is_ok()); // recursive
+        assert!(!root.path().join("d").exists());
     }
 }
