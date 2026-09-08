@@ -32,6 +32,9 @@ setup *ARGS:
 dev:
     docker compose -f deploy/docker-compose.yml up
 
+workspace-image tag="dev":
+    docker build -t hearth-workspace-base:{{tag}} deploy/images/workspace-base
+
 install-services:
     bash deploy/systemd/install.sh
 
