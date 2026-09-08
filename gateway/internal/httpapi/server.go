@@ -71,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 				r.Delete("/{id}", s.ws.destroy)
 				if s.term != nil {
 					r.Get("/{id}/terminal", s.term.Terminal)
+					r.Get("/{id}/events", s.term.Events)
 				}
 				if s.files != nil {
 					r.Get("/{id}/files", s.files.list)
