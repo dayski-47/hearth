@@ -126,7 +126,9 @@ impl Files {
     /// every frame after it carries bytes. The bytes land in a temp file in the
     /// destination directory that is renamed over the destination at the end, so
     /// a crash or a dropped connection leaves either the old file or the new one,
-    /// never a half-written mix. Returns the number of bytes written.
+    /// never a half-written mix. Only a cleanly-ended client stream commits; a
+    /// stream error or a cancelled call discards the temp. Returns the number of
+    /// bytes written.
     pub async fn write_file(&self, mut stream: Streaming<WriteFileFrame>) -> Result<u64, Status> {
         let init = match stream.next().await {
             Some(Ok(WriteFileFrame {
@@ -145,7 +147,10 @@ impl Files {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
         let rp = root.clone();
         let rrel = rel.clone();
-        let aborted = Arc::new(AtomicBool::new(false));
+        // Starts set: any early exit — a stream error, or the whole handler
+        // future being dropped mid-upload — leaves it set and the writer bins
+        // the temp. Only a clean end of the stream clears it.
+        let aborted = Arc::new(AtomicBool::new(true));
         let writer_abort = Arc::clone(&aborted);
         let writer = tokio::task::spawn_blocking(move || {
             write_atomic_blocking(&rp, &rrel, rx, writer_abort)
@@ -162,15 +167,17 @@ impl Files {
                 }
                 Ok(_) => {} // a second init or an empty frame: ignore
                 Err(e) => {
-                    // A broken client stream mid-upload: tell the writer to bin
-                    // the temp file instead of renaming a half-written mix.
-                    aborted.store(true, Ordering::SeqCst);
+                    // A broken client stream mid-upload: leave `aborted` set so
+                    // the writer bins the temp instead of renaming a half-written
+                    // mix.
                     drop(tx);
                     let _ = writer.await;
                     return Err(Status::internal(format!("client stream: {e}")));
                 }
             }
         }
+        // Reached only on a clean `None` end of the stream: let the writer commit.
+        aborted.store(false, Ordering::SeqCst);
         drop(tx);
         writer
             .await
