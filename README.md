@@ -50,8 +50,8 @@ data-plane line:
   creates, starts, stops, and destroys workspace containers there, under a
   hardened rootless-Podman profile.
 - **`hearth-workspace`** (Rust) also runs on every worker host. It handles the
-  high-frequency work inside a running container: terminal sessions and file
-  operations, with live file-change events still to come.
+  high-frequency work inside a running container: terminal sessions, file
+  operations, and a filesystem watch that streams change events out.
 
 ## Roadmap
 
@@ -61,6 +61,7 @@ data-plane line:
 - [x] Terminal transport: a gateway WebSocket bridged to a container PTY
 - [x] A bare browser page: log in, pick a workspace, get a terminal
 - [x] File operations: list, read, write, create, rename, delete, over REST
-- [ ] Live file-change events, a file tree, and an editor
+- [x] Live file-change events streamed to the browser over a WebSocket
+- [ ] A file tree and an editor
 - [ ] Reconnect and session resume
 - [ ] `docker-compose` and Caddy deploy, a pinned workspace image, CI golden path
