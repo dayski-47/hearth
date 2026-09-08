@@ -37,17 +37,18 @@ sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
 # Caddy serves TLS for a real domain (Let's Encrypt) and for localhost (internal CA).
 scheme=https
 
-# Fill .env.example line by line. Most values (base64 secret, paths, URLs) hold
-# no '$', so they are written bare - both compose env_file and systemd
-# EnvironmentFile read them literally. The argon2id hash is the exception: it is
-# '$'-delimited, and compose's env_file interpolation would eat every "$word".
-# Single quotes stop that; compose and systemd both strip the surrounding quotes.
+# Fill .env.example line by line. Most values (paths, URLs) hold no '$', so they
+# are written bare - both compose env_file and systemd EnvironmentFile read them
+# literally. The session secret and the argon2id hash are single-quoted: the
+# hash is '$'-delimited and compose's env_file interpolation would eat every
+# "$word", and the secret is quoted for the same reason in case a future
+# generator emits a '$'. Compose and systemd both strip the surrounding quotes.
 while IFS= read -r line || [[ -n "$line" ]]; do
   case $line in
     HEARTH_DOMAIN=*)              printf '%s\n' "HEARTH_DOMAIN=${domain}" ;;
     HEARTH_PUBLIC_URL=*)          printf '%s\n' "HEARTH_PUBLIC_URL=${scheme}://${domain}" ;;
     HEARTH_ALLOWED_ORIGIN=*)      printf '%s\n' "HEARTH_ALLOWED_ORIGIN=${scheme}://${domain}" ;;
-    HEARTH_SESSION_SECRET=*)      printf '%s\n' "HEARTH_SESSION_SECRET=${secret}" ;;
+    HEARTH_SESSION_SECRET=*)      printf "%s\n" "HEARTH_SESSION_SECRET='${secret}'" ;;
     HEARTH_ADMIN_USER=*)          printf '%s\n' "HEARTH_ADMIN_USER=${admin_user}" ;;
     HEARTH_ADMIN_PASSWORD_HASH=*) printf "%s\n" "HEARTH_ADMIN_PASSWORD_HASH='${admin_hash}'" ;;
     HEARTH_PODMAN_SOCKET=*)       printf '%s\n' "HEARTH_PODMAN_SOCKET=${sock}" ;;
