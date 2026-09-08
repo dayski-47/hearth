@@ -109,8 +109,8 @@ func TestEventsBridgeForwards(t *testing.T) {
 	defer conn.CloseNow()
 
 	want := []string{
-		`{"kind":"CREATED","path":"a.txt"}`,
-		`{"kind":"MODIFIED","path":"a.txt"}`,
+		`{"path":"a.txt","kind":"CREATED"}`,
+		`{"path":"a.txt","kind":"MODIFIED"}`,
 	}
 	for i, w := range want {
 		typ, data, err := conn.Read(ctx)

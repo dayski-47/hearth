@@ -13,6 +13,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// fileEventFrame is the JSON shape sent to the browser for each file change.
+type fileEventFrame struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
 // Events streams a workspace's file-change events to the browser. The socket is
 // server->browser only, so unlike the terminal bridge it uses conn.CloseRead:
 // there is no client frame to read, and CloseRead still handles pings and the
@@ -28,7 +34,7 @@ func (d Deps) Events(w http.ResponseWriter, r *http.Request) {
 		OriginPatterns: []string{hostOf(d.AllowedOrigin)},
 	})
 	if err != nil {
-		return
+		return // Accept already wrote the response (e.g. 403 on an origin mismatch).
 	}
 	defer conn.CloseNow()
 	ctx := conn.CloseRead(r.Context())
@@ -58,10 +64,11 @@ func (d Deps) Events(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close(websocket.StatusNormalClosure, "stream ended")
 			return
 		}
-		msg, merr := json.Marshal(map[string]any{"path": ev.Path, "kind": ev.Kind.String()})
-		if merr != nil {
-			continue
-		}
+		// An empty path with KIND_UNSPECIFIED is the watcher's resync signal: the
+		// event channel backed up and some changes were dropped, so a client
+		// should re-fetch the tree. It is forwarded as-is; the empty path is how
+		// the client tells it apart from a real event.
+		msg, _ := json.Marshal(fileEventFrame{Path: ev.Path, Kind: ev.Kind.String()})
 		if conn.Write(ctx, websocket.MessageText, msg) != nil {
 			return
 		}
