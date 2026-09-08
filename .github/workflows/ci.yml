@@ -50,3 +50,40 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+  gated:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational until it proves stable (spec §10)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.27" }
+      - uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Start a rootless Podman service
+        run: |
+          sudo apt-get update && sudo apt-get install -y podman
+          mkdir -p "$XDG_RUNTIME_DIR/podman"
+          podman system service --time=0 "unix://$XDG_RUNTIME_DIR/podman/podman.sock" &
+          for i in $(seq 1 20); do
+            [ -S "$XDG_RUNTIME_DIR/podman/podman.sock" ] && break
+            sleep 0.5
+          done
+          echo "HEARTH_PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock" >> "$GITHUB_ENV"
+
+      - name: Codegen + build the data plane
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.47.2
+          buf generate
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0
+          (cd gateway/internal/store && sqlc generate)
+          bash deploy/certs/gen-ca.sh
+          cargo build -p hearth-agent -p hearth-workspace
+
+      - name: Rust gated smokes (single-threaded)
+        run: |
+          export HEARTH_PODMAN_IT=1
+          cargo test -p hearth-agent -p hearth-workspace --test '*' -- --test-threads=1 --nocapture
+
+      - name: Go gated e2e
+        working-directory: gateway
+        run: HEARTH_E2E=1 go test ./tests/... -run E2E -v
