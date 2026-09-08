@@ -17,6 +17,9 @@ is nothing to install on the machine you are sitting at.
   volume.
 - **Browser terminal.** A `podman exec` PTY streamed to a real xterm.js
   terminal in the browser over one authenticated, origin-checked WebSocket.
+- **File access.** List, read, write, create, rename, and delete files in a
+  workspace over REST, with every path confined to the workspace volume by
+  the kernel (`openat2` with `RESOLVE_BENEATH`), and atomic saves.
 - **Control plane and data plane are separate.** A stateless Go gateway holds
   the database and the API; small per-host Rust services own the container
   runtime. A bug in terminal handling cannot take down auth or the database.
@@ -47,8 +50,8 @@ data-plane line:
   creates, starts, stops, and destroys workspace containers there, under a
   hardened rootless-Podman profile.
 - **`hearth-workspace`** (Rust) also runs on every worker host. It handles the
-  high-frequency work inside a running container: terminal sessions now, file
-  I/O later.
+  high-frequency work inside a running container: terminal sessions and file
+  operations, with live file-change events still to come.
 
 ## Roadmap
 
@@ -57,6 +60,7 @@ data-plane line:
 - [x] Workspace lifecycle over the REST API, with a reconciliation loop
 - [x] Terminal transport: a gateway WebSocket bridged to a container PTY
 - [x] A bare browser page: log in, pick a workspace, get a terminal
-- [ ] File tree, editor, and live file-change events
+- [x] File operations: list, read, write, create, rename, delete, over REST
+- [ ] Live file-change events, a file tree, and an editor
 - [ ] Reconnect and session resume
 - [ ] `docker-compose` and Caddy deploy, a pinned workspace image, CI golden path
