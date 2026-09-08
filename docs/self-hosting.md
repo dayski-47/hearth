@@ -123,17 +123,43 @@ the database password would not. To change it later you have to delete the
 
 ## Using your own base image
 
-Every workspace starts from one OCI image. Set `HEARTH_WORKSPACE_IMAGE` in
-`.env` to any image that has a shell, then restart the gateway container as
-above. A workspace is a hardened container (all capabilities dropped, read-only
-root, user-namespace mapping), so the image only needs a shell and whatever
-tools you want available by default.
+Every workspace starts from one OCI image, named by `HEARTH_WORKSPACE_IMAGE`
+in `.env`. A fresh `.env` sets it to
+`ghcr.io/dayski-47/hearth-workspace-base:latest`. That image is built from
+`deploy/images/workspace-base/`; its [`README.md`](../deploy/images/workspace-base/README.md)
+lists what is baked in and how new versions are cut. Publishing is tag driven:
+pushing a `workspace-base-v*` git tag runs a workflow that builds the image,
+scans it with Trivy, and pushes it to `ghcr.io/dayski-47/hearth-workspace-base`
+as both `:v<n>` and `:latest`. A real image sits at that path only once such a
+tag has been pushed, so if you run from a fork with nothing published there,
+point `HEARTH_WORKSPACE_IMAGE` at an image you can pull.
 
-No workspace image is published yet, though a fresh `.env` carries one as the
-default, so for now point `HEARTH_WORKSPACE_IMAGE` at an image you can pull, for
-example a stock `docker.io/library/debian:stable` or one you build yourself. A
-published default image and a `just workspace-image` helper to build it are
-coming with the CI work.
+The default image is deliberately large (around 2 GB): git, a C/C++ toolchain,
+Go, Rust, Node, and Python are all baked in so a workspace is usable without
+reaching the network. If your workspaces always have network access, a slim
+image such as `docker.io/library/debian:stable` is fine.
+
+To build and extend it yourself, copy
+`deploy/images/workspace-base/Dockerfile`, add the tools you want, and build it:
+
+```
+docker build -t my-workspace-base .
+```
+
+Then set `HEARTH_WORKSPACE_IMAGE=my-workspace-base` in `.env` and restart the
+gateway container so it re-reads its environment:
+
+```
+docker compose -f deploy/docker-compose.yml up -d --force-recreate gateway
+```
+
+For a quick local build straight from the repo, `just workspace-image` builds
+the same Dockerfile and tags it `hearth-workspace-base:dev`.
+
+Any OCI image with a shell works. A workspace is a hardened container (all
+capabilities dropped, read-only root, user-namespace mapping), so the image
+only needs a shell and whatever tools you want available by default; nothing
+Hearth-specific is required in it.
 
 ## Locking networking down
 
