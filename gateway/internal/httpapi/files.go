@@ -151,6 +151,13 @@ func (d *FileDeps) writeContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The body arrived in full: tell the workspace so it commits the temp. A
+	// body read error above returns without this frame, which is what makes
+	// the workspace discard a partial upload.
+	if serr := stream.Send(&hv1.WriteFileFrame{Msg: &hv1.WriteFileFrame_End{End: &hv1.WriteFileEnd{}}}); serr != nil {
+		reportSendFailure(w, stream)
+		return
+	}
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
 		grpcToHTTP(w, err)

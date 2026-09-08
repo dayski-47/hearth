@@ -51,10 +51,12 @@ message ListDirResponse { repeated Node entries = 1; }
 message ReadFileRequest { string workspace_id = 1; string path = 2; }
 message FileChunk { bytes data = 1; }
 message WriteFileInit { string workspace_id = 1; string path = 2; }
+message WriteFileEnd {}
 message WriteFileFrame {
   oneof msg {
     WriteFileInit init = 1;
     bytes data = 2;
+    WriteFileEnd end = 3;
   }
 }
 message WriteFileResponse { uint64 bytes_written = 1; }

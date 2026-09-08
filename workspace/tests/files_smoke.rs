@@ -16,7 +16,7 @@ use futures_util::StreamExt;
 use hearth_proto::hearth::v1::{
     workspace_io_client::WorkspaceIoClient, workspace_io_server::WorkspaceIoServer,
     write_file_frame::Msg, CreateNodeRequest, DeleteNodeRequest, ListDirRequest, ReadFileRequest,
-    RenameNodeRequest, WriteFileFrame, WriteFileInit,
+    RenameNodeRequest, WriteFileEnd, WriteFileFrame, WriteFileInit,
 };
 use hearth_workspace::engine::PodmanExec;
 use hearth_workspace::files::Files;
@@ -125,6 +125,9 @@ async fn round_trip(
         },
         WriteFileFrame {
             msg: Some(Msg::Data(b"world".to_vec())),
+        },
+        WriteFileFrame {
+            msg: Some(Msg::End(WriteFileEnd {})),
         },
     ];
     let written = client

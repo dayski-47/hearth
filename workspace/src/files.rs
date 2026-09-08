@@ -127,9 +127,10 @@ impl Files {
     /// every frame after it carries bytes. The bytes land in a temp file in the
     /// destination directory that is renamed over the destination at the end, so
     /// a crash or a dropped connection leaves either the old file or the new one,
-    /// never a half-written mix. Only a cleanly-ended client stream commits; a
-    /// stream error or a cancelled call discards the temp. Returns the number of
-    /// bytes written.
+    /// never a half-written mix. The temp is committed only after the client
+    /// sends the end frame; a stream that ends any other way — an error, an
+    /// abort, a dropped connection, or a client that never sends `End` — leaves
+    /// the destination untouched. Returns the number of bytes written.
     pub async fn write_file(&self, mut stream: Streaming<WriteFileFrame>) -> Result<u64, Status> {
         let init = match stream.next().await {
             Some(Ok(WriteFileFrame {
@@ -157,6 +158,10 @@ impl Files {
             write_atomic_blocking(&rp, &rrel, rx, writer_abort)
         });
 
+        // tonic surfaces a client that just drops its send side as a plain
+        // `None`, indistinguishable from a finished upload, so the client has
+        // to say so explicitly. Nothing else clears `aborted`.
+        let mut saw_end = false;
         while let Some(frame) = stream.next().await {
             match frame {
                 Ok(WriteFileFrame {
@@ -165,6 +170,12 @@ impl Files {
                     if tx.send(d).await.is_err() {
                         break; // the writer died; its Result carries the error
                     }
+                }
+                Ok(WriteFileFrame {
+                    msg: Some(WriteMsg::End(_)),
+                }) => {
+                    saw_end = true;
+                    break;
                 }
                 Ok(_) => {} // a second init or an empty frame: ignore
                 Err(e) => {
@@ -177,8 +188,11 @@ impl Files {
                 }
             }
         }
-        // Reached only on a clean `None` end of the stream: let the writer commit.
-        aborted.store(false, Ordering::SeqCst);
+        // Commit only if the client sent `End`; any other way out of the loop
+        // leaves `aborted` set and the writer bins the temp.
+        if saw_end {
+            aborted.store(false, Ordering::SeqCst);
+        }
         drop(tx);
         writer
             .await
