@@ -28,14 +28,18 @@ fn to_file_event(root: &Path, ev: &DebouncedEvent) -> Option<FileEvent> {
     };
     let raw = ev.paths.first()?;
     let rel = raw.strip_prefix(root).ok()?;
+    // Drop anything living inside an ignored directory at any depth: a nested
+    // `packages/app/node_modules` counts, but `.gitignore` (a plain file name,
+    // not the `.git` directory) does not.
+    if rel.components().any(|c| {
+        matches!(c, std::path::Component::Normal(name)
+            if IGNORE.iter().any(|d| name == std::ffi::OsStr::new(d)))
+    }) {
+        return None;
+    }
     let rel = rel.to_string_lossy();
     if rel.is_empty() {
         return None;
-    }
-    for d in IGNORE {
-        if rel == *d || rel.starts_with(&format!("{d}/")) {
-            return None;
-        }
     }
     Some(FileEvent {
         path: rel.into_owned(),
@@ -68,11 +72,18 @@ pub fn start(root: PathBuf) -> Result<ReceiverStream<Result<FileEvent, Status>>,
                 Err(mpsc::error::TrySendError::Closed(_)) => return,
             }
         }
-        if behind_cb.swap(false, Ordering::Relaxed) {
-            let _ = tx_for_cb.try_send(Ok(FileEvent {
-                path: String::new(),
-                kind: Kind::Unspecified as i32,
-            }));
+        // Only clear `behind` once the sentinel has genuinely gone out. The
+        // channel is usually still full at this point, so retry on every later
+        // callback until the client actually receives the resync signal.
+        if behind_cb.load(Ordering::Relaxed)
+            && tx_for_cb
+                .try_send(Ok(FileEvent {
+                    path: String::new(),
+                    kind: Kind::Unspecified as i32,
+                }))
+                .is_ok()
+        {
+            behind_cb.store(false, Ordering::Relaxed);
         }
     })
     .map_err(|e| Status::internal(format!("start watcher: {e}")))?;
@@ -122,6 +133,35 @@ mod tests {
             })
         );
 
+        // a modify keeps its kind
+        assert_eq!(
+            to_file_event(
+                root,
+                &mk(
+                    EventKind::Modify(notify::event::ModifyKind::Any),
+                    "/vol/a/b.txt",
+                ),
+            ),
+            Some(FileEvent {
+                path: "a/b.txt".into(),
+                kind: Kind::Modified as i32,
+            })
+        );
+        // so does a remove
+        assert_eq!(
+            to_file_event(
+                root,
+                &mk(
+                    EventKind::Remove(notify::event::RemoveKind::File),
+                    "/vol/a/b.txt",
+                ),
+            ),
+            Some(FileEvent {
+                path: "a/b.txt".into(),
+                kind: Kind::Removed as i32,
+            })
+        );
+
         // ignored directory -> dropped
         assert_eq!(
             to_file_event(
@@ -132,6 +172,31 @@ mod tests {
                 ),
             ),
             None
+        );
+        // a nested ignored directory -> dropped too
+        assert_eq!(
+            to_file_event(
+                root,
+                &mk(
+                    EventKind::Create(notify::event::CreateKind::File),
+                    "/vol/packages/app/node_modules/x",
+                ),
+            ),
+            None
+        );
+        // `.gitignore` is a file, not the `.git` directory -> kept
+        assert_eq!(
+            to_file_event(
+                root,
+                &mk(
+                    EventKind::Modify(notify::event::ModifyKind::Any),
+                    "/vol/.gitignore",
+                ),
+            ),
+            Some(FileEvent {
+                path: ".gitignore".into(),
+                kind: Kind::Modified as i32,
+            })
         );
         // a path outside the root -> dropped
         assert_eq!(
