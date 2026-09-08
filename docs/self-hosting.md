@@ -32,11 +32,23 @@ The two host services listen on all interfaces: `hearth-agent` on
 rather than loopback because the gateway runs in a container and reaches them
 across the Podman bridge at `host.containers.internal`. Every call is gated by
 mutual TLS: the gateway must present a client certificate from the local
-certificate authority that `just setup` generates. Even so, on a host with a
-public interface you should firewall 9091 and 9092 so they are reachable only
-from the host itself. The gateway's own gRPC port is published on
-`127.0.0.1:9090` for the host agent to register against, and only Caddy
-publishes 80 and 443.
+certificate authority that `just setup` generates.
+
+The gateway container reaches 9091 and 9092 across the Compose bridge, whose
+subnet is pinned to `10.7.0.0/24`. A host with a default-deny firewall must
+allow that subnet to those ports, or workspace operations time out (`docker
+compose` login and `/healthz` still work, so the symptom is a 502 only when a
+workspace is created):
+
+```
+sudo ufw allow from 10.7.0.0/24 to any port 9091 proto tcp
+sudo ufw allow from 10.7.0.0/24 to any port 9092 proto tcp
+```
+
+On a host with a public interface, close 9091 and 9092 to everything else so
+they are reachable only from that subnet. The gateway's own gRPC port is
+published on `127.0.0.1:9090` for the host agent to register against, and only
+Caddy publishes 80 and 443.
 
 ## Why two of the five services run on the host
 
