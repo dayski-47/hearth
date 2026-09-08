@@ -19,6 +19,11 @@ leaf() {
     -days $DAYS -extfile <(printf "subjectAltName=%s\nextendedKeyUsage=serverAuth,clientAuth\n" "$san") \
     -out "${name}.pem"
   rm -f "${name}.csr"
+  # The gateway container runs as a non-root user (distroless :nonroot, uid
+  # 65532) and mounts this directory read-only, so the leaf keys must be
+  # world-readable. They only ever exist inside deploy/certs/, which is
+  # gitignored and lives on the deploy host; the CA private key stays 0600.
+  chmod 0644 "${name}-key.pem"
 }
 
 leaf gateway hearth-gateway "DNS:localhost,DNS:hearth-gateway,IP:127.0.0.1"
