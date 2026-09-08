@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bollard::Docker;
 use futures_util::StreamExt;
@@ -144,7 +145,11 @@ impl Files {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
         let rp = root.clone();
         let rrel = rel.clone();
-        let writer = tokio::task::spawn_blocking(move || write_atomic_blocking(&rp, &rrel, rx));
+        let aborted = Arc::new(AtomicBool::new(false));
+        let writer_abort = Arc::clone(&aborted);
+        let writer = tokio::task::spawn_blocking(move || {
+            write_atomic_blocking(&rp, &rrel, rx, writer_abort)
+        });
 
         while let Some(frame) = stream.next().await {
             match frame {
@@ -157,6 +162,9 @@ impl Files {
                 }
                 Ok(_) => {} // a second init or an empty frame: ignore
                 Err(e) => {
+                    // A broken client stream mid-upload: tell the writer to bin
+                    // the temp file instead of renaming a half-written mix.
+                    aborted.store(true, Ordering::SeqCst);
                     drop(tx);
                     let _ = writer.await;
                     return Err(Status::internal(format!("client stream: {e}")));
@@ -368,6 +376,7 @@ fn write_atomic_blocking(
     root: &Path,
     rel: &Path,
     mut rx: mpsc::Receiver<Vec<u8>>,
+    aborted: Arc<AtomicBool>,
 ) -> Result<u64, Status> {
     use std::io::Write;
     let (parent_fd, name) = open_parent(root, rel)?;
@@ -397,6 +406,11 @@ fn write_atomic_blocking(
             return Err(cleanup(Status::internal(format!("write: {e}"))));
         }
         total += chunk.len() as u64;
+    }
+    if aborted.load(Ordering::SeqCst) {
+        return Err(cleanup(Status::cancelled(
+            "write aborted before completion",
+        )));
     }
     if let Err(e) = file.sync_all() {
         return Err(cleanup(Status::internal(format!("fsync: {e}"))));
@@ -575,13 +589,46 @@ mod tests {
         // A clean run replaces "f" in place and leaves no temp file behind.
         let rp = root.path().to_path_buf();
         let (tx, rx) = mpsc::channel::<Vec<u8>>(2);
-        let h = tokio::task::spawn_blocking(move || write_atomic_blocking(&rp, Path::new("f"), rx));
+        let aborted = Arc::new(AtomicBool::new(false));
+        let h = tokio::task::spawn_blocking(move || {
+            write_atomic_blocking(&rp, Path::new("f"), rx, aborted)
+        });
         tx.send(b"new".to_vec()).await.unwrap();
         drop(tx); // clean end -> this one SUCCEEDS; assert it replaced the file
         let n = h.await.unwrap().unwrap();
         assert_eq!(n, 3);
         assert_eq!(std::fs::read(root.path().join("f")).unwrap(), b"new");
         // no leftover temp files
+        let leftovers: Vec<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".hearth-tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::result_large_err)]
+    async fn write_aborted_leaves_the_original() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("f"), b"original").unwrap();
+
+        // The flag is already set when the writer's channel closes: it must bin
+        // the temp file rather than rename it over "f".
+        let rp = root.path().to_path_buf();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(2);
+        let aborted = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&aborted);
+        let h = tokio::task::spawn_blocking(move || {
+            write_atomic_blocking(&rp, Path::new("f"), rx, flag)
+        });
+        tx.send(b"partial".to_vec()).await.unwrap();
+        aborted.store(true, Ordering::SeqCst);
+        drop(tx);
+
+        let err = h.await.unwrap().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Cancelled);
+        assert_eq!(std::fs::read(root.path().join("f")).unwrap(), b"original");
         let leftovers: Vec<_> = std::fs::read_dir(root.path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -601,5 +648,18 @@ mod tests {
         );
         assert!(delete_node_blocking(root.path(), Path::new("d")).is_ok()); // recursive
         assert!(!root.path().join("d").exists());
+    }
+
+    #[test]
+    fn node_ops_reject_escape() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a"), b"x").unwrap();
+        std::os::unix::fs::symlink("/", root.path().join("esc")).unwrap();
+
+        // Every write op reaches its parent through open_beneath, so a symlink
+        // that points out of the root is refused by the kernel.
+        assert!(create_node_blocking(root.path(), Path::new("esc/tmp/x"), false).is_err());
+        assert!(rename_node_blocking(root.path(), Path::new("a"), Path::new("esc/tmp/x")).is_err());
+        assert!(delete_node_blocking(root.path(), Path::new("esc/tmp")).is_err());
     }
 }
