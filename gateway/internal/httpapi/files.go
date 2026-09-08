@@ -88,6 +88,9 @@ func (d *FileDeps) readContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
+	// Workspace file content is arbitrary bytes the user put there; never let a
+	// browser sniff it into something executable.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	wroteHeader := false
 	for {
 		chunk, err := stream.Recv()
@@ -128,7 +131,7 @@ func (d *FileDeps) writeContent(w http.ResponseWriter, r *http.Request) {
 	if err := stream.Send(&hv1.WriteFileFrame{Msg: &hv1.WriteFileFrame_Init{
 		Init: &hv1.WriteFileInit{WorkspaceId: wid, Path: path},
 	}}); err != nil {
-		grpcToHTTP(w, err)
+		reportSendFailure(w, stream)
 		return
 	}
 	buf := make([]byte, 64*1024)
@@ -136,7 +139,7 @@ func (d *FileDeps) writeContent(w http.ResponseWriter, r *http.Request) {
 		n, rerr := r.Body.Read(buf)
 		if n > 0 {
 			if serr := stream.Send(&hv1.WriteFileFrame{Msg: &hv1.WriteFileFrame_Data{Data: buf[:n]}}); serr != nil {
-				grpcToHTTP(w, serr)
+				reportSendFailure(w, stream)
 				return
 			}
 		}
@@ -154,6 +157,18 @@ func (d *FileDeps) writeContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"bytes_written": resp.BytesWritten})
+}
+
+// reportSendFailure maps the real error behind a failed client-stream Send. On
+// a client-streaming RPC, Send returns a bare io.EOF once the server has closed
+// the stream; the status that actually explains why is delivered by
+// CloseAndRecv, so pull it from there rather than mapping the io.EOF.
+func reportSendFailure(w http.ResponseWriter, stream hv1.WorkspaceIo_WriteFileClient) {
+	if _, rerr := stream.CloseAndRecv(); rerr != nil {
+		grpcToHTTP(w, rerr)
+		return
+	}
+	http.Error(w, "workspace call failed", http.StatusBadGateway)
 }
 
 func (d *FileDeps) create(w http.ResponseWriter, r *http.Request) {

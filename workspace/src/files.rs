@@ -25,7 +25,8 @@ use tonic::{Status, Streaming};
 pub struct Files {
     docker: Docker,
     /// workspace id -> the volume's mount point on disk, from `podman volume
-    /// inspect`. Filled on first use, never invalidated except on a NotFound.
+    /// inspect`. Filled on first use and kept for the lifetime of the process;
+    /// a volume's mount point does not move while it exists.
     roots: Mutex<HashMap<String, PathBuf>>,
     read_cap: u64,
 }
@@ -477,28 +478,44 @@ fn delete_node_blocking(root: &Path, rel: &Path) -> Result<(), Status> {
 
 #[allow(clippy::result_large_err)]
 fn rmdir_recursive(dir_fd: &OwnedFd) -> Result<(), Status> {
-    let dir = rustix::fs::Dir::read_from(dir_fd)
-        .map_err(|e| Status::internal(format!("readdir: {e}")))?;
-    for entry in dir {
-        let entry = entry.map_err(|e| Status::internal(format!("readdir: {e}")))?;
-        let name = entry.file_name();
-        if name.to_bytes() == b"." || name.to_bytes() == b".." {
-            continue;
+    // Drain the whole directory stream before touching anything. Unlinking
+    // entries while the `getdents` cursor is still open makes the kernel skip
+    // over entries on a refill, so a large tree (a real `.git/objects` or
+    // `node_modules`) would be left half-populated and the final rmdir would
+    // fail with ENOTEMPTY.
+    let mut entries: Vec<(std::ffi::CString, bool)> = Vec::new();
+    {
+        let dir = rustix::fs::Dir::read_from(dir_fd)
+            .map_err(|e| Status::internal(format!("readdir: {e}")))?;
+        for entry in dir {
+            let entry = entry.map_err(|e| Status::internal(format!("readdir: {e}")))?;
+            let name = entry.file_name();
+            if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                continue;
+            }
+            let st = rustix::fs::statat(dir_fd, name, AtFlags::SYMLINK_NOFOLLOW)
+                .map_err(map_open_err)?;
+            let is_dir =
+                rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory;
+            entries.push((name.to_owned(), is_dir));
         }
-        let st =
-            rustix::fs::statat(dir_fd, name, AtFlags::SYMLINK_NOFOLLOW).map_err(map_open_err)?;
-        if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::Directory {
+    }
+
+    for (name, is_dir) in entries {
+        if is_dir {
             let child = rustix::fs::openat(
                 dir_fd,
-                name,
+                name.as_c_str(),
                 OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
                 Mode::empty(),
             )
             .map_err(map_open_err)?;
             rmdir_recursive(&child)?;
-            rustix::fs::unlinkat(dir_fd, name, AtFlags::REMOVEDIR).map_err(map_open_err)?;
+            rustix::fs::unlinkat(dir_fd, name.as_c_str(), AtFlags::REMOVEDIR)
+                .map_err(map_open_err)?;
         } else {
-            rustix::fs::unlinkat(dir_fd, name, AtFlags::empty()).map_err(map_open_err)?;
+            rustix::fs::unlinkat(dir_fd, name.as_c_str(), AtFlags::empty())
+                .map_err(map_open_err)?;
         }
     }
     Ok(())
@@ -654,6 +671,22 @@ mod tests {
             rename_node_blocking(root.path(), Path::new("d/x.txt"), Path::new("d/y.txt")).is_ok()
         );
         assert!(delete_node_blocking(root.path(), Path::new("d")).is_ok()); // recursive
+        assert!(!root.path().join("d").exists());
+    }
+
+    #[test]
+    fn delete_node_recurses_a_large_directory() {
+        let root = tempfile::tempdir().unwrap();
+        create_node_blocking(root.path(), Path::new("d"), true).unwrap();
+
+        // Enough entries to force the readdir buffer to refill mid-walk, which
+        // is where deleting while the stream is live used to drop entries.
+        let d = root.path().join("d");
+        for i in 0..5000 {
+            std::fs::write(d.join(format!("f{i}")), b"x").unwrap();
+        }
+
+        assert!(delete_node_blocking(root.path(), Path::new("d")).is_ok());
         assert!(!root.path().join("d").exists());
     }
 
