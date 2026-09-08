@@ -13,11 +13,10 @@ import (
 	"strconv"
 
 	"github.com/coder/websocket"
-	"github.com/dayski-47/hearth/gateway/internal/auth"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/store/gen"
-	"github.com/go-chi/chi/v5"
+	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -35,6 +34,7 @@ type WSDialer interface {
 type Deps struct {
 	Store         WSStore
 	Reg           WSRegistry
+	Resolver      wsresolve.Resolver
 	Dial          WSDialer
 	AllowedOrigin string
 	Logger        *slog.Logger
@@ -61,35 +61,11 @@ func (d Deps) logErr(ctx context.Context, msg string, args ...any) {
 }
 
 func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFromContext(r.Context())
+	wksp, addr, ok := d.Resolver.Resolve(w, r, "running")
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	id, err := store.ParseUUID(chi.URLParam(r, "id"))
-	if err != nil {
-		http.Error(w, "bad workspace id", http.StatusBadRequest)
-		return
-	}
-	wid := store.UUIDString(id)
-	wksp, err := d.Store.GetWorkspaceForOwner(r.Context(), gen.GetWorkspaceForOwnerParams{ID: id, OwnerID: u.ID})
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	if wksp.State != "running" {
-		http.Error(w, "workspace is not running", http.StatusConflict)
-		return
-	}
-	if wksp.AgentID == nil {
-		http.Error(w, "workspace has no host", http.StatusConflict)
-		return
-	}
-	addr, ok := d.Reg.WorkspaceAddr(*wksp.AgentID)
-	if !ok {
-		http.Error(w, "workspace host unavailable", http.StatusServiceUnavailable)
-		return
-	}
+	wid := store.UUIDString(wksp.ID)
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{hostOf(d.AllowedOrigin)},

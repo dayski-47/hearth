@@ -20,6 +20,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/tlsutil"
 	"github.com/dayski-47/hearth/gateway/internal/workspaceclient"
 	"github.com/dayski-47/hearth/gateway/internal/ws"
+	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
 	"github.com/go-chi/chi/v5"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -122,9 +123,12 @@ func newBridge(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fs := fakeStore{agentID: "agent-1"}
+	fr := fakeRegistry{addr: addr}
 	deps := ws.Deps{
-		Store:         fakeStore{agentID: "agent-1"},
-		Reg:           fakeRegistry{addr: addr},
+		Store:         fs,
+		Reg:           fr,
+		Resolver:      wsresolve.Resolver{Store: fs, Reg: fr},
 		Dial:          tlsDialer{cfg: cliTLS},
 		AllowedOrigin: testOrigin,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),

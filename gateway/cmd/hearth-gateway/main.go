@@ -31,6 +31,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/workspaceclient"
 	"github.com/dayski-47/hearth/gateway/internal/workspaces"
 	"github.com/dayski-47/hearth/gateway/internal/ws"
+	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -132,6 +133,7 @@ func runServe() error {
 	term := &ws.Deps{
 		Store:         st.Queries(),
 		Reg:           reg,
+		Resolver:      wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:          wsDialer{tls: wsTLS},
 		AllowedOrigin: cfg.AllowedOrigin,
 		Logger:        logger,

@@ -31,6 +31,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/workspaceclient"
 	"github.com/dayski-47/hearth/gateway/internal/workspaces"
 	"github.com/dayski-47/hearth/gateway/internal/ws"
+	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -185,6 +186,7 @@ func TestTerminalE2E(t *testing.T) {
 	term := &ws.Deps{
 		Store:         st.Queries(),
 		Reg:           reg,
+		Resolver:      wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:          wsDialer{tls: wsClientTLS},
 		AllowedOrigin: cfg.AllowedOrigin,
 		Logger:        logger,
