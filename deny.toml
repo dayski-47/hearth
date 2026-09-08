@@ -9,6 +9,7 @@ yanked = "deny"
 ignore = ["RUSTSEC-2025-0134"]
 
 [licenses]
+unused-allowed-license = "allow"
 allow = [
   "MIT",
   "Apache-2.0",

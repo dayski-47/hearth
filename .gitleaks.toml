@@ -5,9 +5,5 @@ useDefault = true
 
 [allowlist]
 description = "test fixtures and local-CA material, not real secrets"
-paths = [
-  '''deploy/certs/gen-ca\.sh''',
-  '''.*_test\.go''',
-  '''.*/tests/.*''',
-  '''\.env\.example''',
-]
+regexes = ['''0123456789abcdef0123456789abcdef''']
+paths = ['''\.env\.example''']
