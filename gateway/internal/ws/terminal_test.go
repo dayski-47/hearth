@@ -126,8 +126,6 @@ func newBridge(t *testing.T) *httptest.Server {
 	fs := fakeStore{agentID: "agent-1"}
 	fr := fakeRegistry{addr: addr}
 	deps := ws.Deps{
-		Store:         fs,
-		Reg:           fr,
 		Resolver:      wsresolve.Resolver{Store: fs, Reg: fr},
 		Dial:          tlsDialer{cfg: cliTLS},
 		AllowedOrigin: testOrigin,

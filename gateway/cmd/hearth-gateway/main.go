@@ -131,16 +131,19 @@ func runServe() error {
 		return err
 	}
 	term := &ws.Deps{
-		Store:         st.Queries(),
-		Reg:           reg,
 		Resolver:      wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:          wsDialer{tls: wsTLS},
 		AllowedOrigin: cfg.AllowedOrigin,
 		Logger:        logger,
 	}
+	files := &httpapi.FileDeps{
+		Resolver: wsresolve.Resolver{Store: st.Queries(), Reg: reg},
+		Dial:     wsDialer{tls: wsTLS},
+		Logger:   logger,
+	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc, term).Run(gctx) })
+	g.Go(func() error { return httpapi.New(cfg, st, logger, authH, wsSvc, term, files).Run(gctx) })
 	g.Go(func() error {
 		go func() { <-gctx.Done(); gs.GracefulStop() }()
 		logger.Info("gateway grpc listening", "addr", cfg.GRPCListenAddr)

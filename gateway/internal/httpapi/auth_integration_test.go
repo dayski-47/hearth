@@ -68,7 +68,7 @@ func newTestServer(t *testing.T, webDir string) (*httptest.Server, string) {
 		AdminUser: cfg.AdminUser, AdminHash: cfg.AdminPasswordHash, SecureCookie: false,
 	}, logger)
 
-	srv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, nil, nil).Handler())
+	srv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, nil, nil, nil).Handler())
 	t.Cleanup(srv.Close)
 	return srv, hash
 }

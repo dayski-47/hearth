@@ -15,25 +15,16 @@ import (
 	"github.com/coder/websocket"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
-	"github.com/dayski-47/hearth/gateway/internal/store/gen"
 	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type WSStore interface {
-	GetWorkspaceForOwner(context.Context, gen.GetWorkspaceForOwnerParams) (gen.Workspace, error)
-}
-type WSRegistry interface {
-	WorkspaceAddr(id string) (string, bool)
-}
 type WSDialer interface {
 	Dial(addr string) (hv1.WorkspaceIoClient, io.Closer, error)
 }
 
 type Deps struct {
-	Store         WSStore
-	Reg           WSRegistry
 	Resolver      wsresolve.Resolver
 	Dial          WSDialer
 	AllowedOrigin string

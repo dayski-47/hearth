@@ -184,8 +184,6 @@ func TestTerminalE2E(t *testing.T) {
 	}, logger)
 	wsSvc := workspaces.NewService(st.Queries(), reg, agentDialer{tls: agentTLS}, cfg.Workspace, logger)
 	term := &ws.Deps{
-		Store:         st.Queries(),
-		Reg:           reg,
 		Resolver:      wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:          wsDialer{tls: wsClientTLS},
 		AllowedOrigin: cfg.AllowedOrigin,
@@ -193,7 +191,7 @@ func TestTerminalE2E(t *testing.T) {
 	}
 	httpSrv := &httptest.Server{
 		Listener: httpLis,
-		Config:   &http.Server{Handler: httpapi.New(cfg, st, logger, authH, wsSvc, term).Handler()},
+		Config:   &http.Server{Handler: httpapi.New(cfg, st, logger, authH, wsSvc, term, nil).Handler()},
 	}
 	httpSrv.Start()
 	t.Cleanup(httpSrv.Close)

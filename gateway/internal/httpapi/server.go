@@ -28,10 +28,13 @@ type Server struct {
 	// term is nil when the server is built without the terminal bridge; the
 	// /workspaces/{id}/terminal route is then simply not mounted.
 	term *ws.Deps
+	// files is nil when the server is built without the workspace file surface;
+	// the /workspaces/{id}/files* routes are then simply not mounted.
+	files *FileDeps
 }
 
-func New(cfg *config.Config, st *store.Store, logger *slog.Logger, authH *auth.Handlers, wsSvc *workspaces.Service, term *ws.Deps) *Server {
-	s := &Server{cfg: cfg, st: st, logger: logger, auth: authH, term: term}
+func New(cfg *config.Config, st *store.Store, logger *slog.Logger, authH *auth.Handlers, wsSvc *workspaces.Service, term *ws.Deps, files *FileDeps) *Server {
+	s := &Server{cfg: cfg, st: st, logger: logger, auth: authH, term: term, files: files}
 	if wsSvc != nil {
 		s.ws = &workspaceHandlers{svc: wsSvc, logger: logger}
 	}
@@ -68,6 +71,14 @@ func (s *Server) Handler() http.Handler {
 				r.Delete("/{id}", s.ws.destroy)
 				if s.term != nil {
 					r.Get("/{id}/terminal", s.term.Terminal)
+				}
+				if s.files != nil {
+					r.Get("/{id}/files", s.files.list)
+					r.Get("/{id}/files/content", s.files.readContent)
+					r.Put("/{id}/files/content", s.files.writeContent)
+					r.Post("/{id}/files", s.files.create)
+					r.Post("/{id}/files/rename", s.files.rename)
+					r.Delete("/{id}/files", s.files.del)
 				}
 			})
 		}
