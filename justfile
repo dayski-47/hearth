@@ -31,3 +31,9 @@ setup *ARGS:
 
 dev:
     docker compose -f deploy/docker-compose.yml up
+
+install-services:
+    bash deploy/systemd/install.sh
+
+uninstall-services:
+    bash deploy/systemd/install.sh --uninstall

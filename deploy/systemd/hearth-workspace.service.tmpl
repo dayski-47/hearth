@@ -1,0 +1,15 @@
+[Unit]
+Description=Hearth workspace service (terminal + files)
+After=podman.socket
+Wants=podman.socket
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+EnvironmentFile=@REPO@/.env
+ExecStart=@REPO@/target/release/hearth-workspace
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
