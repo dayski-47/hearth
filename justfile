@@ -26,5 +26,8 @@ migrate DIR="up":
 certs:
     bash deploy/certs/gen-ca.sh
 
+setup *ARGS:
+    bash deploy/setup.sh {{ARGS}}
+
 dev:
-    docker compose -f deploy/compose/docker-compose.dev.yml up
+    docker compose -f deploy/docker-compose.yml up
