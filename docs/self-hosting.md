@@ -19,7 +19,7 @@ For what Hearth is and how the services fit together, see the README.
   too, but enabling the Podman socket is yours to do).
 - **Docker** and **Compose v2** (`docker compose version` should succeed). The
   gateway, Postgres, and Caddy run as containers.
-- The **Rust toolchain** (`cargo`), used once to build the two host binaries.
+- The **Rust toolchain** (`cargo`), used to build the two host binaries.
 - Either a **domain** pointed at the host, or acceptance of a browser
   certificate warning on `localhost`. With a real domain Caddy fetches a
   Let's Encrypt certificate automatically. With `localhost` it self-signs, and
@@ -87,28 +87,32 @@ The per-workspace resource limits live in `.env` as `HEARTH_WORKSPACE_*`:
 | `HEARTH_WORKSPACE_DISK` | Disk quota in bytes | `5368709120` (5 GiB) |
 | `HEARTH_WORKSPACE_IDLE_TIMEOUT` | Idle time before a workspace is paused | `30m` |
 
-After editing `.env`, recreate the gateway and restart the host services so
-they pick up the new values:
+These values are read by the gateway alone; it passes the limits to the host
+agent per workspace. After editing `.env`, restart the gateway container so it
+re-reads its environment:
 
 ```
-docker compose -f deploy/docker-compose.yml up -d
-systemctl --user restart hearth-agent hearth-workspace
+docker compose -f deploy/docker-compose.yml up -d --force-recreate gateway
 ```
 
 New limits apply to workspaces created after the restart.
 
 The Postgres password is a separate setting. The compose default is `hearth`,
-and Postgres is never published outside the compose network. To change it, set
+and Postgres is never published outside the compose network. Set
 `POSTGRES_PASSWORD` in `deploy/.env` (Compose reads that file when it parses the
-stack) and recreate the stack.
+stack) before the first `docker compose up`. Changing it on a running stack does
+not work: `pgdata` keeps the password from its first launch and Postgres ignores
+the variable afterward, so the gateway's connection string would change while
+the database password would not. To change it later you have to delete the
+`pgdata` volume as well, which wipes the database.
 
 ## Using your own base image
 
 Every workspace starts from one OCI image. Set `HEARTH_WORKSPACE_IMAGE` in
-`.env` to any image that has a shell, then recreate the gateway and restart the
-host services as above. A workspace is a hardened container (all capabilities
-dropped, read-only root, user-namespace mapping), so the image only needs a
-shell and whatever tools you want available by default.
+`.env` to any image that has a shell, then restart the gateway container as
+above. A workspace is a hardened container (all capabilities dropped, read-only
+root, user-namespace mapping), so the image only needs a shell and whatever
+tools you want available by default.
 
 No workspace image is published yet, though a fresh `.env` carries one as the
 default, so for now point `HEARTH_WORKSPACE_IMAGE` at an image you can pull, for
@@ -126,10 +130,10 @@ no inbound connections. To cut off egress entirely, set:
 HEARTH_WORKSPACE_NETWORK=none
 ```
 
-in `.env` and restart as above. Workspaces then have no network at all. The
-trade-off is that nothing inside a workspace can reach the internet: no
-`git clone`, no package installs, no outbound API calls. Use this when a
-workspace should only ever touch code you put in its volume yourself.
+in `.env` and restart the gateway container as above. Workspaces then have no
+network at all. The trade-off is that nothing inside a workspace can reach the
+internet: no `git clone`, no package installs, no outbound API calls. Use this
+when a workspace should only ever touch code you put in its volume yourself.
 
 ## A second host
 
@@ -159,5 +163,6 @@ docker compose -f deploy/docker-compose.yml down -v
 
 `just uninstall-services` disables and removes the two systemd units.
 `down -v` stops the containers and deletes their volumes, including the Postgres
-database and Caddy's certificate cache. Remove the repository checkout to
-finish.
+database and Caddy's certificate cache; on a real domain the next `up` re-fetches
+certificates from Let's Encrypt, so repeated teardowns can run into its rate
+limits. Remove the repository checkout to finish.
