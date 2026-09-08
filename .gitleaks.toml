@@ -1,0 +1,13 @@
+title = "hearth gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "test fixtures and local-CA material, not real secrets"
+paths = [
+  '''deploy/certs/gen-ca\.sh''',
+  '''.*_test\.go''',
+  '''.*/tests/.*''',
+  '''\.env\.example''',
+]
