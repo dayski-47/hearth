@@ -20,6 +20,9 @@ proto:
     buf generate
     cargo build -p hearth-proto
 
+deny:
+    cargo deny check
+
 migrate DIR="up":
     goose -dir gateway/internal/store/migrations postgres "$DATABASE_URL" {{DIR}}
 
