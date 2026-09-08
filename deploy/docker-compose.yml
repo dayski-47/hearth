@@ -1,0 +1,66 @@
+name: hearth
+
+networks:
+  hearth:
+    ipam:
+      config:
+        - subnet: 10.7.0.0/24   # pinned so HEARTH_TRUSTED_PROXIES is deterministic
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: hearth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hearth}
+      POSTGRES_DB: hearth
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [hearth]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hearth"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+    image: hearth-gateway:local
+    ports:
+      - "127.0.0.1:9090:9090"
+    env_file: ../.env
+    environment:
+      HEARTH_LISTEN_ADDR: 0.0.0.0:8080
+      HEARTH_GRPC_LISTEN_ADDR: 0.0.0.0:9090
+      DATABASE_URL: postgres://hearth:${POSTGRES_PASSWORD:-hearth}@postgres:5432/hearth?sslmode=disable
+      HEARTH_TRUSTED_PROXIES: 10.7.0.0/24
+    volumes:
+      - ../deploy/certs:/certs:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [hearth]
+    # The data plane runs on the host; the gateway reaches it via this name.
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: ../.env
+    volumes:
+      - ../deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [gateway]
+    networks: [hearth]
+    restart: unless-stopped
