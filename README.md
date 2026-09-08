@@ -53,6 +53,14 @@ data-plane line:
   high-frequency work inside a running container: terminal sessions, file
   operations, and a filesystem watch that streams change events out.
 
+## Self-hosting
+
+Hearth runs on a single Linux host: `docker compose` brings up the gateway,
+Postgres, and Caddy, and two rootless `systemd --user` services run the
+container data plane. See [docs/self-hosting.md](docs/self-hosting.md) for the
+four command setup and the configuration knobs (workspace limits, a custom base
+image, network lockdown).
+
 ## Roadmap
 
 - [x] Service skeleton, mutual TLS, agent registration
@@ -62,6 +70,7 @@ data-plane line:
 - [x] A bare browser page: log in, pick a workspace, get a terminal
 - [x] File operations: list, read, write, create, rename, delete, over REST
 - [x] Live file-change events streamed to the browser over a WebSocket
+- [x] `docker-compose` and Caddy deploy on a single host
 - [ ] A file tree and an editor
 - [ ] Reconnect and session resume
-- [ ] `docker-compose` and Caddy deploy, a pinned workspace image, CI golden path
+- [ ] A pinned workspace base image and CI security scanning
