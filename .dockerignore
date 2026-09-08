@@ -1,0 +1,10 @@
+.git
+truth
+target
+web/node_modules
+web/dist
+deploy/certs/*.pem
+deploy/certs/*.srl
+*.env
+!.env.example
+bin
