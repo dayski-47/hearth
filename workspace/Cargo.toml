@@ -18,6 +18,8 @@ bytes = "1"
 tokio-stream = "0.1"
 rustix = { version = "1", features = ["fs"] }
 rand = "0.8"
+notify = "6"
+notify-debouncer-full = "0.3"
 
 [lib]
 name = "hearth_workspace"

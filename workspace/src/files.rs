@@ -66,6 +66,17 @@ impl Files {
         Ok(p)
     }
 
+    /// Stream filesystem changes under the workspace volume, debounced and
+    /// mapped to paths relative to the volume root. The stream ends when the
+    /// caller drops it.
+    pub async fn watch(
+        &self,
+        workspace_id: &str,
+    ) -> Result<ReceiverStream<Result<hearth_proto::hearth::v1::FileEvent, Status>>, Status> {
+        let root = self.root(workspace_id).await?;
+        crate::watch::start(root)
+    }
+
     pub async fn list_dir(&self, workspace_id: &str, path: &str) -> Result<Vec<Node>, Status> {
         let root = self.root(workspace_id).await?;
         let rel = clean_rel(path)?;

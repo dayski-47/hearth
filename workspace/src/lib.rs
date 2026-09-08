@@ -4,6 +4,7 @@ pub mod files;
 pub mod grpc;
 pub mod terminal;
 pub mod tls;
+pub mod watch;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {

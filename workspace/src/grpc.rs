@@ -102,9 +102,11 @@ impl WorkspaceIo for WorkspaceSvc {
 
     async fn watch_changes(
         &self,
-        _r: Request<WatchRequest>,
+        r: Request<WatchRequest>,
     ) -> Result<Response<Self::WatchChangesStream>, Status> {
-        Err(Status::unimplemented("watch: Plan 5b"))
+        let r = r.into_inner();
+        let stream = self.files.watch(&r.workspace_id).await?;
+        Ok(Response::new(stream))
     }
 }
 
