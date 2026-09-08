@@ -1,4 +1,4 @@
-//! The inbound gRPC surface the gateway dials for terminal traffic.
+//! The inbound gRPC surface the gateway dials for terminal and file traffic.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -13,15 +13,20 @@ use hearth_proto::hearth::v1::{
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 
-use crate::{config::Config, engine::PodmanExec, terminal, tls};
+use crate::{config::Config, engine::PodmanExec, files::Files, terminal, tls};
+
+/// Largest file `read_file` will stream back. A workspace is for source, not
+/// for shipping build artefacts down the wire.
+const READ_CAP: u64 = 10 * 1024 * 1024;
 
 pub struct WorkspaceSvc {
     exec: Arc<PodmanExec>,
+    files: Arc<Files>,
 }
 
 impl WorkspaceSvc {
-    pub fn new(exec: Arc<PodmanExec>) -> Self {
-        Self { exec }
+    pub fn new(exec: Arc<PodmanExec>, files: Arc<Files>) -> Self {
+        Self { exec, files }
     }
 }
 
@@ -44,45 +49,62 @@ impl WorkspaceIo for WorkspaceSvc {
 
     async fn list_dir(
         &self,
-        _r: Request<ListDirRequest>,
+        r: Request<ListDirRequest>,
     ) -> Result<Response<ListDirResponse>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+        let r = r.into_inner();
+        let entries = self.files.list_dir(&r.workspace_id, &r.path).await?;
+        Ok(Response::new(ListDirResponse { entries }))
     }
 
     async fn read_file(
         &self,
-        _r: Request<ReadFileRequest>,
+        r: Request<ReadFileRequest>,
     ) -> Result<Response<Self::ReadFileStream>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+        let r = r.into_inner();
+        let stream = self.files.read_file(&r.workspace_id, &r.path).await?;
+        Ok(Response::new(stream))
     }
 
     async fn write_file(
         &self,
-        _r: Request<tonic::Streaming<WriteFileFrame>>,
+        r: Request<tonic::Streaming<WriteFileFrame>>,
     ) -> Result<Response<WriteFileResponse>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+        let bytes_written = self.files.write_file(r.into_inner()).await?;
+        Ok(Response::new(WriteFileResponse { bytes_written }))
     }
 
-    async fn create_node(&self, _r: Request<CreateNodeRequest>) -> Result<Response<Node>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+    async fn create_node(&self, r: Request<CreateNodeRequest>) -> Result<Response<Node>, Status> {
+        let r = r.into_inner();
+        let node = self
+            .files
+            .create_node(&r.workspace_id, &r.path, r.is_dir)
+            .await?;
+        Ok(Response::new(node))
     }
 
     async fn delete_node(
         &self,
-        _r: Request<DeleteNodeRequest>,
+        r: Request<DeleteNodeRequest>,
     ) -> Result<Response<DeleteNodeResponse>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+        let r = r.into_inner();
+        self.files.delete_node(&r.workspace_id, &r.path).await?;
+        Ok(Response::new(DeleteNodeResponse {}))
     }
 
-    async fn rename_node(&self, _r: Request<RenameNodeRequest>) -> Result<Response<Node>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+    async fn rename_node(&self, r: Request<RenameNodeRequest>) -> Result<Response<Node>, Status> {
+        let r = r.into_inner();
+        let node = self
+            .files
+            .rename_node(&r.workspace_id, &r.from, &r.to)
+            .await?;
+        Ok(Response::new(node))
     }
 
     async fn watch_changes(
         &self,
         _r: Request<WatchRequest>,
     ) -> Result<Response<Self::WatchChangesStream>, Status> {
-        Err(Status::unimplemented("files: a later phase"))
+        Err(Status::unimplemented("watch: Plan 5b"))
     }
 }
 
@@ -95,10 +117,12 @@ where
         .parse()
         .context("parse grpc listen addr")?;
     let tls_config = tls::server_config(&cfg.tls)?;
+    let exec = Arc::new(exec);
+    let files = Arc::new(Files::new(exec.docker().clone(), READ_CAP));
     tracing::info!(%addr, "workspace grpc listening");
     Server::builder()
         .tls_config(tls_config)?
-        .add_service(WorkspaceIoServer::new(WorkspaceSvc::new(Arc::new(exec))))
+        .add_service(WorkspaceIoServer::new(WorkspaceSvc::new(exec, files)))
         .serve_with_shutdown(addr, shutdown)
         .await
         .context("grpc serve")?;
@@ -110,8 +134,9 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    // The unimplemented RPCs never touch the exec, but WorkspaceSvc needs one.
-    // Build a real PodmanExec only when the gated socket is available.
+    // The file RPCs need a real Files (and so a real container-engine socket) to
+    // reach a volume. Build the whole service only when the gated socket is
+    // available.
     fn svc_or_skip() -> Option<WorkspaceSvc> {
         if std::env::var("HEARTH_PODMAN_IT").as_deref() != Ok("1") {
             return None;
@@ -120,11 +145,13 @@ mod tests {
             std::env::var("HEARTH_PODMAN_SOCKET").ok().as_deref(),
         )
         .ok()?;
-        Some(WorkspaceSvc::new(Arc::new(exec)))
+        let exec = Arc::new(exec);
+        let files = Arc::new(Files::new(exec.docker().clone(), READ_CAP));
+        Some(WorkspaceSvc::new(exec, files))
     }
 
     #[tokio::test]
-    async fn list_dir_is_unimplemented() {
+    async fn list_dir_needs_a_workspace() {
         let Some(svc) = svc_or_skip() else {
             eprintln!("skipped: set HEARTH_PODMAN_IT=1");
             return;
@@ -138,6 +165,7 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Unimplemented);
+        // No volume named `hearth-ws-w1` exists, so the inspect 404s.
+        assert_eq!(err.code(), tonic::Code::NotFound);
     }
 }
