@@ -1,7 +1,7 @@
 # Self-hosting Hearth
 
 Hearth runs on a single Linux host you control. This guide takes you from a
-fresh server to a working login in five commands, then covers the knobs you are
+fresh server to a working login in four commands, then covers the knobs you are
 most likely to reach for: workspace limits, a custom base image, and network
 lockdown.
 
@@ -18,7 +18,10 @@ For what Hearth is and how the services fit together, see the README.
   the host services running after you log out (`just install-services` runs it
   too, but enabling the Podman socket is yours to do).
 - **Docker** and **Compose v2** (`docker compose version` should succeed). The
-  gateway, Postgres, and Caddy run as containers.
+  gateway, Postgres, and Caddy run as containers. The stack is tested only with
+  Docker and Compose v2; `podman-compose` mostly works but differs on
+  `extra_hosts: host-gateway` and healthcheck syntax, so treat it as
+  best-effort.
 - The **Rust toolchain** (`cargo`), used to build the two host binaries.
 - Either a **domain** pointed at the host, or acceptance of a browser
   certificate warning on `localhost`. With a real domain Caddy fetches a
