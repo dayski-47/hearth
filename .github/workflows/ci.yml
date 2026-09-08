@@ -2,6 +2,8 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+permissions:
+  contents: read
 jobs:
   gateway:
     runs-on: ubuntu-latest
@@ -18,7 +20,7 @@ jobs:
       - name: govulncheck
         working-directory: gateway
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
   rust:
     runs-on: ubuntu-latest
@@ -30,7 +32,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
-      - run: cargo install cargo-deny --locked
+      - run: cargo install cargo-deny --locked --version 0.20.2
       - run: cargo deny check
   proto:
     runs-on: ubuntu-latest
@@ -42,13 +44,18 @@ jobs:
           lint: true
           breaking: true
           breaking_against: "https://github.com/dayski-47/hearth.git#branch=main"
+          push: false
   secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v2
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
   gated:
     runs-on: ubuntu-latest
@@ -61,10 +68,13 @@ jobs:
 
       - name: Start a rootless Podman service
         run: |
-          sudo apt-get update && sudo apt-get install -y podman
+          export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+          mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null \
+            || { sudo mkdir -p "$XDG_RUNTIME_DIR" && sudo chown "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR"; }
+          sudo apt-get update && sudo apt-get install -y podman protobuf-compiler
           mkdir -p "$XDG_RUNTIME_DIR/podman"
           podman system service --time=0 "unix://$XDG_RUNTIME_DIR/podman/podman.sock" &
-          for i in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             [ -S "$XDG_RUNTIME_DIR/podman/podman.sock" ] && break
             sleep 0.5
           done
