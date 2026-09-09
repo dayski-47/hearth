@@ -35,6 +35,13 @@ setup *ARGS:
 dev:
     docker compose -f deploy/docker-compose.yml up
 
+web:
+    npm --prefix web ci
+    npm --prefix web run build
+
+web-dev:
+    npm --prefix web run dev
+
 workspace-image tag="dev":
     docker build -t hearth-workspace-base:{{tag}} deploy/images/workspace-base
 

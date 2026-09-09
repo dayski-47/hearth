@@ -1,43 +1,13 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hearth</title>
-<link rel="stylesheet" href="/vendor/xterm.css">
-<style>
-  :root { color-scheme: dark; }
-  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
-         background: #16181d; color: #d7dae0;
-         font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  header { padding: 8px 12px; border-bottom: 1px solid #2a2d35; display: flex; gap: 12px; align-items: center; }
-  header select, header button, #login input, #login button {
-    background: #21242c; color: inherit; border: 1px solid #3a3d47; border-radius: 4px; padding: 6px 10px; }
-  #login { margin: auto; display: flex; flex-direction: column; gap: 10px; width: 260px; }
-  #term { flex: 1; padding: 6px; }
-  .hidden { display: none !important; }
-  #login-err { color: #e06c75; min-height: 1em; }
-</style>
-</head>
-<body>
-<form id="login">
-  <strong>Hearth</strong>
-  <input name="username" placeholder="username" value="admin" autocomplete="username">
-  <input name="password" type="password" placeholder="password" autocomplete="current-password">
-  <button type="submit">Log in</button>
-  <span id="login-err"></span>
-</form>
-
-<header class="hidden">
-  <strong>Hearth</strong>
-  <select id="ws"></select>
-  <button id="new">New workspace</button>
-  <button id="logout" style="margin-left:auto">Log out</button>
-</header>
-<div id="term" class="hidden"></div>
-
-<script src="/vendor/xterm.js"></script>
-<script src="/vendor/addon-fit.js"></script>
-<script src="/app.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Hearth</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
