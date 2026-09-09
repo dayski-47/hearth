@@ -5,9 +5,50 @@ import Workspace from "./Workspace";
 
 const future = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
+// xterm needs a real canvas; jsdom has none. Stub it so the pane can mount.
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class {
+    cols = 80;
+    rows = 24;
+    buffer = { active: { length: 1 } };
+    loadAddon() {}
+    open() {}
+    write() {}
+    writeln() {}
+    onData() {
+      return { dispose() {} };
+    }
+    dispose() {}
+  },
+}));
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit() {}
+  },
+}));
+
+class FakeWS {
+  static OPEN = 1;
+  static CONNECTING = 0;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  readyState = 0;
+  binaryType = "";
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((e: { data: ArrayBuffer }) => void) | null = null;
+  send() {}
+  close() {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+}
+
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
+  vi.unstubAllGlobals();
 });
 
 function mount(id = "a") {
@@ -21,6 +62,7 @@ function mount(id = "a") {
 }
 
 test("running workspace renders the terminal pane", async () => {
+  vi.stubGlobal("WebSocket", FakeWS as unknown as typeof WebSocket);
   globalThis.fetch = vi.fn(
     async () =>
       new Response(
@@ -36,7 +78,8 @@ test("running workspace renders the terminal pane", async () => {
       ),
   ) as typeof fetch;
   mount();
-  expect(await screen.findByText(/Terminal \(Task 7\)/)).toBeInTheDocument();
+  await screen.findByRole("button", { name: "Terminal" });
+  expect(document.querySelector(".term-pane")).not.toBeNull();
 });
 
 test("stopped workspace disables the terminal with a hint", async () => {

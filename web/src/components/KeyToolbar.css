@@ -1,0 +1,17 @@
+.key-toolbar {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+}
+.key-toolbar button {
+  padding: 6px 10px;
+  font: var(--mono);
+  flex: 0 0 auto;
+}
+.key-toolbar button.sticky {
+  border-color: var(--accent);
+  color: var(--accent);
+}

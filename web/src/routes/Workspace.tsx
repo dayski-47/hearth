@@ -7,6 +7,7 @@ import { useMediaQuery } from "../lib/useMediaQuery";
 import PaneSwitcher from "../components/PaneSwitcher";
 import StateBadge from "../components/StateBadge";
 import StatusBar from "../components/StatusBar";
+import TerminalPane from "../components/TerminalPane";
 import "./Workspace.css";
 
 export default function Workspace() {
@@ -14,6 +15,7 @@ export default function Workspace() {
   const narrow = useMediaQuery("(max-width: 900px)");
   const pane = useStore((s) => s.ui.pane);
   const setPane = useStore((s) => s.setPane);
+  const conn = useStore((s) => s.terminal.conn);
   const cached = useStore((s) => s.workspaces.list.find((w) => w.id === id));
 
   const [ws, setWs] = useState<Ws | null>(cached ?? null);
@@ -63,11 +65,11 @@ export default function Workspace() {
 
   const filesPane = <div className="pane pane-files">File tree (Stage B)</div>;
   const editorPane = <div className="pane pane-editor">Editor (Stage B)</div>;
-  const terminalPane = (
+  const terminalPane = canTerminal ? (
+    <TerminalPane workspaceId={ws.id} />
+  ) : (
     <div className="pane pane-term">
-      {canTerminal
-        ? "Terminal (Task 7)"
-        : `Start the workspace to open a terminal (${ws.state})`}
+      Start the workspace to open a terminal ({ws.state})
     </div>
   );
 
@@ -108,7 +110,12 @@ export default function Workspace() {
         </div>
       )}
 
-      {!narrow && <StatusBar connection="idle" state={ws.state} />}
+      {!narrow && (
+        <StatusBar
+          connection={canTerminal ? conn : "idle"}
+          state={ws.state}
+        />
+      )}
     </main>
   );
 }
