@@ -1,8 +1,16 @@
+/*
+ * .term-pane is always a flex child of a display:flex wrapper that gives it
+ * `flex: 1` (`.term-slot` when wide, `.pane-slot` when narrow; see
+ * Workspace.css). It must not set its own `height`: an explicit height inside
+ * an auto-basis column flex item resolves against the whole column and steals
+ * the editor's space. It just fills the flex track it is handed.
+ */
 .term-pane {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
+  min-width: 0;
   background: #101216;
 }
 .term-bar {

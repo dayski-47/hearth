@@ -1,3 +1,4 @@
+import type { ConnState } from "../api/terminalSocket";
 import type { WorkspaceState } from "../api/types";
 import "./StatusBar.css";
 
@@ -5,7 +6,7 @@ export default function StatusBar({
   connection,
   state,
 }: {
-  connection: "connecting" | "open" | "closed" | "idle";
+  connection: ConnState | "idle";
   state: WorkspaceState;
 }) {
   return (

@@ -12,6 +12,6 @@ export const createTerminalSlice: StateCreator<
   [],
   TerminalSlice
 > = (set) => ({
-  terminal: { conn: "closed" },
+  terminal: { conn: "connecting" },
   setConn: (conn) => set({ terminal: { conn } }),
 });

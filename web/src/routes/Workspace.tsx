@@ -61,12 +61,19 @@ export default function Workspace() {
     );
   }
 
-  const canTerminal = ws.state === "running";
+  const running = ws.state === "running";
 
   const filesPane = <div className="pane pane-files">File tree (Stage B)</div>;
   const editorPane = <div className="pane pane-editor">Editor (Stage B)</div>;
-  const terminalPane = canTerminal ? (
-    <TerminalPane workspaceId={ws.id} />
+  // Mounted once the workspace is running and kept mounted while it stays
+  // running, so hiding the pane (top-bar toggle or the narrow pane switcher)
+  // never tears down the shell session. Visibility is CSS-only below.
+  const terminalPane = running ? (
+    <TerminalPane
+      workspaceId={ws.id}
+      visible={narrow ? pane === "terminal" : termVisible}
+      workspaceState={ws.state}
+    />
   ) : (
     <div className="pane pane-term">
       Start the workspace to open a terminal ({ws.state})
@@ -83,8 +90,8 @@ export default function Workspace() {
         <StateBadge state={ws.state} />
         <span className="spacer" />
         <button
-          disabled={!canTerminal}
-          title={canTerminal ? undefined : "Start the workspace first"}
+          disabled={!running}
+          title={running ? undefined : "Start the workspace first"}
           onClick={() => setTermVisible((v) => !v)}
         >
           Terminal
@@ -95,9 +102,15 @@ export default function Workspace() {
         <>
           <PaneSwitcher pane={pane} onChange={setPane} />
           <div className="ws-body">
-            {pane === "files" && filesPane}
-            {pane === "editor" && editorPane}
-            {pane === "terminal" && terminalPane}
+            <div className="pane-slot" hidden={pane !== "files"}>
+              {filesPane}
+            </div>
+            <div className="pane-slot" hidden={pane !== "editor"}>
+              {editorPane}
+            </div>
+            <div className="pane-slot" hidden={pane !== "terminal"}>
+              {terminalPane}
+            </div>
           </div>
         </>
       ) : (
@@ -105,16 +118,15 @@ export default function Workspace() {
           {filesPane}
           <div className="center">
             {editorPane}
-            {termVisible && terminalPane}
+            <div className="term-slot" hidden={!termVisible}>
+              {terminalPane}
+            </div>
           </div>
         </div>
       )}
 
       {!narrow && (
-        <StatusBar
-          connection={canTerminal ? conn : "idle"}
-          state={ws.state}
-        />
+        <StatusBar connection={running ? conn : "idle"} state={ws.state} />
       )}
     </main>
   );

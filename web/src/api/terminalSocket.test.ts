@@ -83,6 +83,50 @@ test("an unexpected close triggers a backoff reconnect", () => {
   expect(FakeWS.last).not.toBe(first);
 });
 
+test("backoff doubles per close, caps at 5000, and resets after an open", () => {
+  const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+
+  const step = (delay: number) => {
+    const prev = FakeWS.last!;
+    prev.close();
+    vi.advanceTimersByTime(delay - 1);
+    expect(FakeWS.last).toBe(prev);
+    vi.advanceTimersByTime(1);
+    expect(FakeWS.last).not.toBe(prev);
+  };
+
+  step(1000);
+  step(2000);
+  step(4000);
+  step(5000); // min(8000, 5000)
+  step(5000); // stays capped
+
+  FakeWS.last!.open(); // a successful open resets the backoff
+  step(1000);
+});
+
+test("gives up reconnecting after the retry cap", () => {
+  const onGiveUp = vi.fn();
+  const s = new TerminalSocket("abc", {
+    onData: () => {},
+    onState: () => {},
+    onGiveUp,
+  });
+  s.connect(1, 1);
+
+  for (let i = 0; i < 8; i++) {
+    FakeWS.last!.close();
+    vi.advanceTimersByTime(5000);
+  }
+  const settled = FakeWS.last;
+  expect(onGiveUp).toHaveBeenCalledTimes(1);
+
+  vi.advanceTimersByTime(60_000);
+  expect(FakeWS.last).toBe(settled);
+});
+
 test("close() prevents reconnect", () => {
   const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
   s.connect(1, 1);
