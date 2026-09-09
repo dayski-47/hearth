@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { ApiError, api, setUnauthorizedHandler } from "./client";
+import { ApiError, api, postAllowing, setUnauthorizedHandler } from "./client";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -45,6 +45,27 @@ test("401 fires the unauthorized handler once", async () => {
   await expect(api.get("/api/me")).rejects.toBeInstanceOf(ApiError);
   expect(spy).toHaveBeenCalledTimes(1);
   setUnauthorizedHandler(() => {});
+});
+
+test("postAllowing returns the body on an allowed non-2xx", async () => {
+  mockFetch(
+    () =>
+      new Response(JSON.stringify({ id: "e", state: "error" }), { status: 502 }),
+  );
+  const { ok, status, data } = await postAllowing("/api/x", {}, [502]);
+  expect(ok).toBe(false);
+  expect(status).toBe(502);
+  expect(data).toMatchObject({ state: "error" });
+});
+
+test("postAllowing still throws on a non-2xx not in allow", async () => {
+  mockFetch(
+    () => new Response(JSON.stringify({ error: "bad name" }), { status: 400 }),
+  );
+  await expect(postAllowing("/api/x", {}, [502])).rejects.toMatchObject({
+    status: 400,
+    message: "bad name",
+  } satisfies Partial<ApiError>);
 });
 
 test("concurrent GETs to the same path share one request", async () => {

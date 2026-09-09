@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Workspace } from "../api/types";
 import { useStore } from "./index";
 
 const realFetch = globalThis.fetch;
@@ -24,7 +25,7 @@ const wsRunning = {
   state: "running",
   host_id: "local",
   created_at: "2026-06-10T00:00:00Z",
-};
+} satisfies Workspace;
 
 test("fetchWorkspaces populates the list", async () => {
   mock(200, { workspaces: [wsRunning] });
@@ -79,4 +80,75 @@ test("stopPolling during an in-flight tick fetch does not re-arm", async () => {
   releaseFetch(); // the suspended callback resumes; guard must skip schedule()
   await vi.advanceTimersByTimeAsync(60_000);
   expect(calls.n).toBe(2); // no re-armed tick
+});
+
+test("createWorkspace merges the new row", async () => {
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ ...wsRunning, id: "new", name: "n" }), {
+        status: 201,
+      }),
+  ) as typeof fetch;
+  await useStore.getState().createWorkspace("n");
+  expect(useStore.getState().workspaces.list.map((w) => w.id)).toContain("new");
+});
+
+test("createWorkspace on 502 still merges the error row, then rethrows nothing", async () => {
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ ...wsRunning, id: "e", state: "error" }), {
+        status: 502,
+      }),
+  ) as typeof fetch;
+  await useStore.getState().createWorkspace("n");
+  const row = useStore.getState().workspaces.list.find((w) => w.id === "e");
+  expect(row?.state).toBe("error");
+});
+
+test("createWorkspace on 400 throws for the caller", async () => {
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ error: "name is required" }), {
+        status: 400,
+      }),
+  ) as typeof fetch;
+  await expect(useStore.getState().createWorkspace("")).rejects.toThrow(
+    "name is required",
+  );
+});
+
+test("startWorkspace merges the returned running row", async () => {
+  useStore.setState({
+    workspaces: {
+      list: [{ ...wsRunning, state: "stopped" }],
+      loading: false,
+      error: null,
+    },
+  });
+  globalThis.fetch = vi.fn(
+    async () => new Response(JSON.stringify({ ...wsRunning }), { status: 200 }),
+  ) as typeof fetch;
+  await useStore.getState().startWorkspace("a");
+  expect(useStore.getState().workspaces.list[0].state).toBe("running");
+});
+
+test("destroyWorkspace removes the row on 204 and on 404", async () => {
+  useStore.setState({
+    workspaces: { list: [wsRunning], loading: false, error: null },
+  });
+  globalThis.fetch = vi.fn(
+    async () => new Response(null, { status: 204 }),
+  ) as typeof fetch;
+  await useStore.getState().destroyWorkspace("a");
+  expect(useStore.getState().workspaces.list).toHaveLength(0);
+
+  useStore.setState({
+    workspaces: { list: [wsRunning], loading: false, error: null },
+  });
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
+  ) as typeof fetch;
+  await useStore.getState().destroyWorkspace("a");
+  expect(useStore.getState().workspaces.list).toHaveLength(0);
 });

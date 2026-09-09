@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
+import NewWorkspaceForm from "../components/NewWorkspaceForm";
 import WorkspaceCard from "../components/WorkspaceCard";
 import "./Dashboard.css";
 
@@ -28,6 +29,8 @@ export default function Dashboard() {
         <span className="who">{username}</span>
         <button onClick={() => void logout()}>Log out</button>
       </header>
+
+      <NewWorkspaceForm />
 
       {error && (
         <p className="dash-error" role="alert">

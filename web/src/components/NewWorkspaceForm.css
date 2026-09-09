@@ -1,0 +1,15 @@
+.nw-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.nw-open {
+  margin-bottom: 16px;
+}
+.nw-err {
+  color: var(--err);
+  font: var(--mono);
+  width: 100%;
+}

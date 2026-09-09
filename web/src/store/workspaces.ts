@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import { api } from "../api/client";
+import { ApiError, api, postAllowing } from "../api/client";
 import type { Workspace } from "../api/types";
 
 const SLOW_MS = 15_000;
@@ -13,6 +13,10 @@ export interface WorkspacesSlice {
     error: string | null;
   };
   fetchWorkspaces: () => Promise<void>;
+  createWorkspace: (name: string, image?: string) => Promise<void>;
+  startWorkspace: (id: string) => Promise<void>;
+  stopWorkspace: (id: string) => Promise<void>;
+  destroyWorkspace: (id: string) => Promise<void>;
   startPolling: () => void;
   stopPolling: () => void;
 }
@@ -49,6 +53,20 @@ export const createWorkspacesSlice: StateCreator<
     timer = id;
   }
 
+  function upsert(list: Workspace[], ws: Workspace): Workspace[] {
+    const i = list.findIndex((w) => w.id === ws.id);
+    if (i === -1) return [...list, ws];
+    const next = list.slice();
+    next[i] = ws;
+    return next;
+  }
+  function setList(fn: (l: Workspace[]) => Workspace[]) {
+    set((s) => ({ workspaces: { ...s.workspaces, list: fn(s.workspaces.list) } }));
+  }
+  function setError(msg: string) {
+    set((s) => ({ workspaces: { ...s.workspaces, error: msg } }));
+  }
+
   return {
     workspaces: { list: [], loading: false, error: null },
 
@@ -68,6 +86,53 @@ export const createWorkspacesSlice: StateCreator<
           },
         }));
       }
+    },
+
+    async createWorkspace(name, image) {
+      const { data } = await postAllowing<Workspace>(
+        "/api/workspaces",
+        { name, ...(image ? { image } : {}) },
+        [502],
+      );
+      setList((l) => upsert(l, data));
+    },
+
+    async startWorkspace(id) {
+      try {
+        const { data } = await postAllowing<Workspace>(
+          `/api/workspaces/${id}/start`,
+          {},
+          [502],
+        );
+        setList((l) => upsert(l, data));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "start failed");
+      }
+    },
+
+    async stopWorkspace(id) {
+      try {
+        const { data } = await postAllowing<Workspace>(
+          `/api/workspaces/${id}/stop`,
+          {},
+          [502],
+        );
+        setList((l) => upsert(l, data));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "stop failed");
+      }
+    },
+
+    async destroyWorkspace(id) {
+      try {
+        await api.del(`/api/workspaces/${id}`);
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 404) {
+          setError(e instanceof Error ? e.message : "destroy failed");
+          return;
+        }
+      }
+      setList((l) => l.filter((w) => w.id !== id));
     },
 
     startPolling() {

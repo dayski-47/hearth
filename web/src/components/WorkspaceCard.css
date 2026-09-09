@@ -34,3 +34,10 @@
 .btn:hover {
   border-color: var(--accent);
 }
+.ws-card .danger {
+  border-color: var(--err);
+}
+.ws-card .danger:hover {
+  background: var(--err);
+  color: var(--bg);
+}
