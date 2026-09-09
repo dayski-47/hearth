@@ -56,3 +56,27 @@ test("polling refetches on the interval and stops on stopPolling", async () => {
   await vi.advanceTimersByTimeAsync(60_000);
   expect(calls.n).toBe(2);
 });
+
+test("stopPolling during an in-flight tick fetch does not re-arm", async () => {
+  vi.useFakeTimers();
+  const calls = { n: 0 };
+  let releaseFetch: () => void = () => {};
+  globalThis.fetch = vi.fn(async () => {
+    calls.n += 1;
+    await new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    return new Response(JSON.stringify({ workspaces: [] }), { status: 200 });
+  }) as typeof fetch;
+
+  useStore.getState().startPolling();
+  await vi.advanceTimersByTimeAsync(0); // immediate fetch starts (call #1)
+  releaseFetch(); // let it resolve so the initial fetch settles
+  await vi.advanceTimersByTimeAsync(15_000); // slow tick fires (call #2), now suspended on fetch
+  expect(calls.n).toBe(2);
+
+  useStore.getState().stopPolling(); // clears `timer` while the tick fetch is in flight
+  releaseFetch(); // the suspended callback resumes; guard must skip schedule()
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(calls.n).toBe(2); // no re-armed tick
+});

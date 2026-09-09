@@ -37,13 +37,16 @@ export const createWorkspacesSlice: StateCreator<
     const transitioning = get().workspaces.list.some((w) =>
       TRANSIENT.has(w.state),
     );
-    timer = setTimeout(
+    const id = setTimeout(
       async () => {
         await get().fetchWorkspaces();
-        schedule();
+        // A stopPolling() during the awaited fetch clears `timer`; only re-arm
+        // if this tick is still the active one.
+        if (timer === id) schedule();
       },
       transitioning ? FAST_MS : SLOW_MS,
     );
+    timer = id;
   }
 
   return {
