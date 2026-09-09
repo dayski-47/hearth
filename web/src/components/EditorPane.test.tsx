@@ -20,6 +20,7 @@ const tab = (over: Partial<EditorTab> = {}): EditorTab => ({
   changedOnDisk: false,
   openError: null,
   initialDoc: "const a = 1;\n",
+  baseline: "const a = 1;\n",
   reloadNonce: 0,
   ...over,
 });

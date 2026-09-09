@@ -131,6 +131,7 @@ export default function FileTree({
   onOpen: (path: string) => void;
 }) {
   const root = useStore((s) => s.tree.children[""]);
+  const rootLoading = useStore((s) => s.tree.loading.has(""));
   const error = useStore((s) => s.tree.error);
   const createNode = useStore((s) => s.createNode);
   return (
@@ -159,6 +160,11 @@ export default function FileTree({
         </div>
       )}
       <div className="ft-scroll">
+        {rootLoading && (root ?? []).length === 0 && (
+          <div className="ft-row ft-dim" style={{ paddingLeft: 8 }}>
+            ...
+          </div>
+        )}
         {(root ?? []).map((n) => (
           <Row key={n.path} node={n} depth={0} onOpen={onOpen} />
         ))}

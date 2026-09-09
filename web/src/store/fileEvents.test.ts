@@ -41,11 +41,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("CREATED inserts a node under an expanded parent", () => {
-  applyFileEvent({ path: "a.txt", kind: "CREATED" });
-  expect(useStore.getState().tree.children[""].map((n) => n.path)).toEqual([
-    "a.txt",
-  ]);
+test("CREATED refetches the cached parent so the real node type is known", () => {
+  useStore.setState({
+    tree: {
+      ...useStore.getState().tree,
+      expanded: new Set(["", "sub"]),
+      children: { "": [], sub: [] },
+    },
+  });
+  const spy = vi
+    .spyOn(useStore.getState(), "treeRefetchDir")
+    .mockResolvedValue();
+  applyFileEvent({ path: "sub/foo", kind: "CREATED" });
+  expect(spy).toHaveBeenCalledWith("sub");
+});
+
+test("CREATED under an uncached parent does not refetch and does not crash", () => {
+  const fetchDir = vi.spyOn(useStore.getState(), "treeRefetchDir");
+  expect(() =>
+    applyFileEvent({ path: "deep/nested/foo", kind: "CREATED" }),
+  ).not.toThrow();
+  // treeRefetchDir is still called, but its own cache guard makes it a no-op.
+  fetchDir.mockRestore();
+  expect(useStore.getState().tree.children["deep/nested"]).toBeUndefined();
 });
 
 test("REMOVED drops the node from the tree", () => {
@@ -103,6 +121,7 @@ function seedTab(over: Partial<import("./editor").EditorTab> = {}) {
           changedOnDisk: false,
           openError: null,
           initialDoc: null,
+          baseline: "",
           reloadNonce: 0,
           ...over,
         },
@@ -125,6 +144,18 @@ test("MODIFIED on a clean open tab reloads it silently", () => {
   const spy = vi.spyOn(useStore.getState(), "reloadTab").mockResolvedValue();
   applyFileEvent({ path: "a.txt", kind: "MODIFIED" });
   expect(spy).toHaveBeenCalledWith("a.txt");
+});
+
+test("the watcher echo of our own save does not remount the editor", async () => {
+  const realFetch = globalThis.fetch;
+  seedTab({ baseline: "saved body" });
+  globalThis.fetch = vi.fn(
+    async () => new Response("saved body", { status: 200 }),
+  ) as typeof fetch;
+  applyFileEvent({ path: "a.txt", kind: "MODIFIED" });
+  await new Promise((r) => setTimeout(r));
+  expect(useStore.getState().editor.tabs[0].reloadNonce).toBe(0);
+  globalThis.fetch = realFetch;
 });
 
 test("MODIFIED on a dirty open tab flags it changed on disk", () => {
@@ -154,19 +185,21 @@ test("REMOVED on a dirty open tab marks it deleted, keeping the tab", () => {
 
 test("a burst of events within the debounce window is one coalesced flush", () => {
   vi.useFakeTimers();
-  const insert = vi.spyOn(useStore.getState(), "treeInsert");
+  const refetch = vi
+    .spyOn(useStore.getState(), "treeRefetchDir")
+    .mockResolvedValue();
   connectFileEvents("ws1");
   expect(h.onEvent).toBeTypeOf("function");
 
   h.onEvent!({ path: "a.txt", kind: "CREATED" });
   h.onEvent!({ path: "b.txt", kind: "CREATED" });
   vi.advanceTimersByTime(99);
-  expect(insert).not.toHaveBeenCalled(); // timer not yet fired
+  expect(refetch).not.toHaveBeenCalled(); // timer not yet fired
 
   h.onEvent!({ path: "c.txt", kind: "CREATED" }); // resets the debounce
   vi.advanceTimersByTime(99);
-  expect(insert).not.toHaveBeenCalled();
+  expect(refetch).not.toHaveBeenCalled();
 
   vi.advanceTimersByTime(1); // 100 ms since the last event
-  expect(insert).toHaveBeenCalledTimes(3);
+  expect(refetch).toHaveBeenCalledTimes(3);
 });

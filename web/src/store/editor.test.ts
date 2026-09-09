@@ -171,6 +171,57 @@ test("reloadTab on a vanished file marks the tab deleted", async () => {
   expect(useStore.getState().editor.tabs[0].deletedOnDisk).toBe(true);
 });
 
+test("reloadTab leaves the editor in place when disk matches the baseline", async () => {
+  mockText("on disk");
+  await useStore.getState().openFile("a.txt");
+  useStore.getState().consumeInitialDoc("a.txt");
+  useStore.getState().markChangedOnDisk("a.txt", true);
+  const nonce0 = useStore.getState().editor.tabs[0].reloadNonce;
+
+  mockText("on disk"); // the workspace watcher echo of our own write
+  await useStore.getState().reloadTab("a.txt");
+
+  const t = useStore.getState().editor.tabs[0];
+  expect(t.reloadNonce).toBe(nonce0);
+  expect(t.initialDoc).toBeNull();
+  expect(t.changedOnDisk).toBe(false);
+  expect(t.dirty).toBe(false);
+});
+
+test("reloadTab updates the baseline to the fresh disk text", async () => {
+  mockText("v1");
+  await useStore.getState().openFile("a.txt");
+  mockText("v2");
+  await useStore.getState().reloadTab("a.txt");
+  const t = useStore.getState().editor.tabs[0];
+  expect(t.reloadNonce).toBe(1);
+  expect(t.initialDoc).toBe("v2");
+  expect(t.baseline).toBe("v2");
+});
+
+test("reloadTab on a transient server error reads as a reload failure, not a deletion", async () => {
+  mockText("old");
+  await useStore.getState().openFile("a.txt");
+  mockText("bad gateway", 500);
+  await useStore.getState().reloadTab("a.txt");
+  const t = useStore.getState().editor.tabs[0];
+  expect(t.openError).toBe("could not reload the file");
+  expect(t.deletedOnDisk).toBe(false);
+});
+
+test("recordSaved records the written text as the on-disk baseline", async () => {
+  mockText("old");
+  await useStore.getState().openFile("a.txt");
+  useStore.getState().recordSaved("a.txt", "saved body");
+  expect(useStore.getState().editor.tabs[0].baseline).toBe("saved body");
+
+  useStore.getState().consumeInitialDoc("a.txt");
+  const nonce0 = useStore.getState().editor.tabs[0].reloadNonce;
+  mockText("saved body"); // the watcher echo of the save
+  await useStore.getState().reloadTab("a.txt");
+  expect(useStore.getState().editor.tabs[0].reloadNonce).toBe(nonce0);
+});
+
 test("recheckOpenTabs reloads clean tabs and flags dirty ones", async () => {
   mockText("x");
   await useStore.getState().openFile("clean.txt");

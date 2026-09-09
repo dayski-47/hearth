@@ -37,6 +37,7 @@ export interface TreeSlice {
   treeRemove: (path: string) => void;
   treeTouch: (path: string) => void;
   treeRefetchExpanded: () => Promise<void>;
+  treeRefetchDir: (path: string) => Promise<void>;
 }
 
 export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
@@ -238,6 +239,9 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
     },
     async treeRefetchExpanded() {
       for (const p of [...get().tree.expanded]) await fetchDir(p);
+    },
+    async treeRefetchDir(path) {
+      if (get().tree.children[path]) await fetchDir(path);
     },
   };
 };

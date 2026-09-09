@@ -1,5 +1,6 @@
 import { useStore } from "./index";
 import { EventsSocket, type FileEvent } from "../api/eventsSocket";
+import { dirname } from "../lib/fsPath";
 
 // The editor branch is added in task 6 at the marked spots.
 export function applyFileEvent(e: FileEvent): void {
@@ -11,13 +12,9 @@ export function applyFileEvent(e: FileEvent): void {
   }
   switch (e.kind) {
     case "CREATED":
-      s.treeInsert({
-        path: e.path,
-        name: e.path.split("/").pop() ?? e.path,
-        is_dir: false, // an events frame does not say; a dir shows its type on expand
-        size: 0,
-        modified_unix: Math.floor(Date.now() / 1000),
-      });
+      // The events frame carries no type, so refetch the parent (which reports
+      // the real is_dir/size) rather than inserting a guessed node.
+      void s.treeRefetchDir(dirname(e.path));
       break;
     case "REMOVED": {
       s.treeRemove(e.path);

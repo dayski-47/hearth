@@ -51,6 +51,12 @@ test("clicking a file calls onOpen with its path", async () => {
   expect(onOpen).toHaveBeenCalledWith("a.txt");
 });
 
+test("the root pane shows a loading line during the first tree load", () => {
+  seed({ children: {}, loading: new Set([""]) });
+  render(<FileTree onOpen={() => {}} />);
+  expect(screen.getByText("...")).toBeInTheDocument();
+});
+
 test("a tree error renders an alert", () => {
   seed({ error: "file is 20000000 bytes, over the 10485760 byte limit" });
   render(<FileTree onOpen={() => {}} />);

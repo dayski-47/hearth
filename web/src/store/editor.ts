@@ -14,6 +14,8 @@ export interface EditorTab {
   openError: string | null;
   /** The fetched text, handed to the editor once and then released. */
   initialDoc: string | null;
+  /** The last text known to be on disk; a reload that matches it does not remount the editor. */
+  baseline: string;
   /** Bumped on every disk reload so the editor host re-mounts with fresh text. */
   reloadNonce: number;
 }
@@ -63,7 +65,12 @@ export const createEditorSlice: StateCreator<
     const { workspaceId } = get().editor;
     try {
       const text = await readFileContent(workspaceId ?? "", path);
-      patch(path, { initialDoc: text, loaded: true, openError: null });
+      patch(path, {
+        initialDoc: text,
+        baseline: text,
+        loaded: true,
+        openError: null,
+      });
     } catch (e) {
       patch(path, {
         openError:
@@ -90,6 +97,7 @@ export const createEditorSlice: StateCreator<
         changedOnDisk: false,
         openError: null,
         initialDoc: null,
+        baseline: "",
         reloadNonce: 0,
       };
       set((s) => ({
@@ -137,21 +145,32 @@ export const createEditorSlice: StateCreator<
 
     async reloadTab(path) {
       const { workspaceId } = get().editor;
-      const tab = get().editor.tabs.find((t) => t.path === path);
-      if (!tab) return;
+      if (!get().editor.tabs.some((t) => t.path === path)) return;
       try {
         const text = await readFileContent(workspaceId ?? "", path);
-        patch(path, {
-          initialDoc: text,
-          loaded: true,
-          dirty: false,
-          changedOnDisk: false,
-          deletedOnDisk: false,
-          openError: null,
-          reloadNonce: tab.reloadNonce + 1,
-        });
+        const tab = get().editor.tabs.find((t) => t.path === path);
+        if (!tab) return;
+        if (text === tab.baseline) {
+          patch(path, {
+            dirty: false,
+            changedOnDisk: false,
+            deletedOnDisk: false,
+            openError: null,
+          });
+        } else {
+          patch(path, {
+            initialDoc: text,
+            baseline: text,
+            loaded: true,
+            dirty: false,
+            changedOnDisk: false,
+            deletedOnDisk: false,
+            openError: null,
+            reloadNonce: tab.reloadNonce + 1,
+          });
+        }
       } catch (e) {
-        if (e instanceof ApiError) get().markDeleted(path);
+        if (e instanceof ApiError && e.status === 404) get().markDeleted(path);
         else patch(path, { openError: "could not reload the file" });
       }
     },
@@ -168,8 +187,13 @@ export const createEditorSlice: StateCreator<
     consumeInitialDoc(path) {
       patch(path, { initialDoc: null });
     },
-    recordSaved(path, _text) {
-      patch(path, { dirty: false, deletedOnDisk: false, changedOnDisk: false });
+    recordSaved(path, text) {
+      patch(path, {
+        dirty: false,
+        deletedOnDisk: false,
+        changedOnDisk: false,
+        baseline: text,
+      });
     },
 
     setActiveWorkspace(id) {
