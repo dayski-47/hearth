@@ -1,3 +1,4 @@
+import { BackoffSocket } from "./backoffSocket";
 import { encodeResize, encodeStdin } from "./wireCodec";
 
 export type ConnState = "connecting" | "open" | "closed";
@@ -10,101 +11,48 @@ interface Handlers {
   onGiveUp?: () => void;
 }
 
-// Consecutive failed reconnects, with no successful open in between, before the
-// socket stops retrying. A stopped or deleted workspace makes the gateway
-// refuse the upgrade indefinitely; without a cap that is an endless 5s loop of
-// authenticated requests.
-const MAX_ATTEMPTS = 8;
-
+// The workspace terminal stream: a binary WebSocket carrying the tagged stdin
+// and resize frames from wireCodec. The reconnect lifecycle lives in
+// BackoffSocket; this class only owns the url and the framing.
 export class TerminalSocket {
-  private ws: WebSocket | undefined;
-  private closedByUs = false;
-  private attempts = 0;
-  private backoff = 1000;
-  private retry: ReturnType<typeof setTimeout> | undefined;
+  private bs: BackoffSocket;
   private cols = 80;
   private rows = 24;
 
-  constructor(
-    private workspaceId: string,
-    private h: Handlers,
-  ) {}
+  constructor(workspaceId: string, h: Handlers) {
+    this.bs = new BackoffSocket(
+      () => {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${location.host}/api/workspaces/${workspaceId}/terminal?cols=${this.cols}&rows=${this.rows}`;
+      },
+      {
+        binaryType: "arraybuffer",
+        onState: h.onState,
+        onGiveUp: h.onGiveUp,
+        onMessage: (e) => h.onData(new Uint8Array(e.data as ArrayBuffer)),
+      },
+    );
+  }
 
   connect(cols: number, rows: number) {
     this.cols = cols;
     this.rows = rows;
-    this.closedByUs = false;
-    this.attempts = 0;
-    this.backoff = 1000;
-    this.spawn();
-  }
-
-  private detach(ws: WebSocket) {
-    ws.onopen = null;
-    ws.onmessage = null;
-    ws.onclose = null;
-    ws.onerror = null;
-  }
-
-  private spawn() {
-    // Drop any socket still lingering from a previous attempt so its close
-    // event cannot drive a second reconnect chain.
-    if (this.ws) {
-      this.detach(this.ws);
-      try {
-        this.ws.close();
-      } catch {
-        // already closing or closed
-      }
-    }
-
-    this.h.onState("connecting");
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${location.host}/api/workspaces/${this.workspaceId}/terminal?cols=${this.cols}&rows=${this.rows}`;
-    const ws = new WebSocket(url);
-    ws.binaryType = "arraybuffer";
-    this.ws = ws;
-
-    ws.onopen = () => {
-      this.attempts = 0;
-      this.backoff = 1000;
-      this.h.onState("open");
-    };
-    ws.onmessage = (e: MessageEvent) => {
-      this.h.onData(new Uint8Array(e.data as ArrayBuffer));
-    };
-    ws.onclose = () => {
-      this.detach(ws);
-      this.h.onState("closed");
-      if (this.closedByUs) return;
-      this.attempts += 1;
-      if (this.attempts >= MAX_ATTEMPTS) {
-        this.h.onGiveUp?.();
-        return;
-      }
-      this.retry = setTimeout(() => this.spawn(), this.backoff);
-      this.backoff = Math.min(this.backoff * 2, 5000);
-    };
-    ws.onerror = () => ws.close();
+    this.bs.open();
   }
 
   send(data: string) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(encodeStdin(data));
+    const ws = this.bs.socket;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(encodeStdin(data));
   }
 
   resize(cols: number, rows: number) {
     this.cols = cols;
     this.rows = rows;
-    if (this.ws?.readyState === WebSocket.OPEN)
-      this.ws.send(encodeResize(cols, rows));
+    const ws = this.bs.socket;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(encodeResize(cols, rows));
   }
 
   close() {
-    this.closedByUs = true;
-    clearTimeout(this.retry);
-    if (this.ws) {
-      this.detach(this.ws);
-      this.ws.close();
-    }
+    this.bs.close();
   }
 }
