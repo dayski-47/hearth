@@ -40,12 +40,13 @@
 /*
  * Panes are mounted once and shown/hidden with the `hidden` attribute rather
  * than conditional rendering, so the terminal's shell session survives a
- * toggle. `hidden` gives `display:none` by UA style, but the flex `display`
- * rules below would override it, so re-assert it.
+ * toggle. The layout rules below set `display: flex` on the slot wrappers at a
+ * higher specificity than the UA `[hidden] { display: none }`, so this rule
+ * needs `!important` to win and actually hide a toggled-off pane.
  */
 .pane-slot[hidden],
 .term-slot[hidden] {
-  display: none;
+  display: none !important;
 }
 
 /* Wide layout: files rail | (editor stacked over terminal). */
@@ -60,16 +61,17 @@
   flex-direction: column;
 }
 /*
- * .center is a column flex box. The editor grows to fill; the terminal slot
- * takes a ~45% starting share, never dips below 160px, and carries the divider
- * line. When the slot is hidden the editor gets the whole column.
+ * .center is a column flex box. The editor (grow 1, basis 0) takes all the
+ * space the terminal does not: the terminal slot holds a ~45% basis, does not
+ * grow, never dips below 160px, and carries the divider line. When the slot is
+ * hidden the editor gets the whole column.
  */
 .ws-body.wide .center > .pane-editor {
   flex: 1 1 0;
   min-height: 0;
 }
 .ws-body.wide .center > .term-slot {
-  flex: 1 1 45%;
+  flex: 0 1 45%;
   min-height: 160px;
   display: flex;
   border-top: 1px solid var(--border);
