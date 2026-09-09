@@ -107,6 +107,66 @@ test("treeTouch bumps modified_unix for a listed node", () => {
   );
 });
 
+test("createNode posts to the files route then inserts the node", async () => {
+  useStore.setState({
+    tree: {
+      workspaceId: "ws1",
+      expanded: new Set([""]),
+      children: { "": [] },
+      loading: new Set(),
+      error: null,
+    },
+  });
+  const spy = vi.fn(async () => new Response(null, { status: 200 }));
+  globalThis.fetch = spy as unknown as typeof fetch;
+  await useStore.getState().createNode("", "new.txt", false);
+  expect(spy).toHaveBeenCalledTimes(1);
+  const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("/api/workspaces/ws1/files?path=new.txt&dir=false");
+  expect(init.method).toBe("POST");
+  expect(useStore.getState().tree.children[""].map((n) => n.path)).toEqual([
+    "new.txt",
+  ]);
+});
+
+test("renameNode keeps a directory a directory", async () => {
+  useStore.setState({
+    tree: {
+      workspaceId: "ws1",
+      expanded: new Set([""]),
+      children: { "": [node("old", true)] },
+      loading: new Set(),
+      error: null,
+    },
+  });
+  globalThis.fetch = vi.fn(
+    async () => new Response(null, { status: 200 }),
+  ) as unknown as typeof fetch;
+  await useStore.getState().renameNode("old", "new", true);
+  const listed = useStore.getState().tree.children[""];
+  expect(listed.map((n) => n.path)).toEqual(["new"]);
+  expect(listed[0].is_dir).toBe(true);
+});
+
+test("treeRefetchExpanded re-lists every expanded directory", async () => {
+  mockList({ "": [node("sub", true)], sub: [node("sub/x.ts")] });
+  useStore.setState({
+    tree: {
+      workspaceId: "ws1",
+      expanded: new Set(["", "sub"]),
+      children: {},
+      loading: new Set(),
+      error: null,
+    },
+  });
+  const spy = globalThis.fetch as ReturnType<typeof vi.fn>;
+  await useStore.getState().treeRefetchExpanded();
+  const paths = spy.mock.calls.map((c) =>
+    new URL(String(c[0]), "http://x").searchParams.get("path"),
+  );
+  expect(paths).toEqual(["", "sub"]);
+});
+
 test("deleteNode calls the API then patches the tree", async () => {
   useStore.setState({
     tree: {

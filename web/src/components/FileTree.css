@@ -1,0 +1,95 @@
+/* The tree fills its pane and scrolls internally. No virtualization. */
+.file-tree.pane {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--text);
+}
+
+.ft-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.ft-toolbar button {
+  font-size: 12px;
+  padding: 2px 6px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ft-error {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--err);
+  border-bottom: 1px solid var(--border);
+}
+
+.ft-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding-right: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ft-row:hover {
+  background: var(--bg-raised);
+}
+.ft-dim {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.ft-chevron {
+  width: 12px;
+  flex: none;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.ft-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ft-actions {
+  display: none;
+  gap: 2px;
+}
+.ft-row:hover .ft-actions {
+  display: flex;
+}
+.ft-actions button {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ft-row input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 1px 4px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}

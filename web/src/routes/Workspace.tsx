@@ -5,6 +5,7 @@ import type { Workspace as Ws } from "../api/types";
 import { useStore } from "../store";
 import { connectFileEvents, disconnectFileEvents } from "../store/fileEvents";
 import { useMediaQuery } from "../lib/useMediaQuery";
+import FileTree from "../components/FileTree";
 import PaneSwitcher from "../components/PaneSwitcher";
 import StateBadge from "../components/StateBadge";
 import StatusBar from "../components/StatusBar";
@@ -72,7 +73,15 @@ export default function Workspace() {
 
   const running = ws.state === "running";
 
-  const filesPane = <div className="pane pane-files">File tree (Stage B)</div>;
+  const filesPane = (
+    <FileTree
+      onOpen={() => {
+        // Task 5 wires openFile(path); for now the visible effect on a narrow
+        // layout is switching to the editor pane.
+        if (narrow) setPane("editor");
+      }}
+    />
+  );
   const editorPane = <div className="pane pane-editor">Editor (Stage B)</div>;
   // Mounted once the workspace is running and kept mounted while it stays
   // running, so hiding the pane (top-bar toggle or the narrow pane switcher)

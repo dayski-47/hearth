@@ -31,7 +31,7 @@ export interface TreeSlice {
   closeWorkspaceTree: () => void;
   toggleDir: (path: string) => Promise<void>;
   createNode: (parent: string, name: string, isDir: boolean) => Promise<void>;
-  renameNode: (from: string, to: string) => Promise<void>;
+  renameNode: (from: string, to: string, isDir: boolean) => Promise<void>;
   deleteNode: (path: string) => Promise<void>;
   treeInsert: (node: FileNode) => void;
   treeRemove: (path: string) => void;
@@ -150,7 +150,7 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
         }));
       }
     },
-    async renameNode(from, to) {
+    async renameNode(from, to, isDir) {
       const id = wsId();
       if (!id) return;
       try {
@@ -159,7 +159,7 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
         get().treeInsert({
           path: to,
           name: to.split("/").pop() ?? to,
-          is_dir: false,
+          is_dir: isDir,
           size: 0,
           modified_unix: Math.floor(Date.now() / 1000),
         });
