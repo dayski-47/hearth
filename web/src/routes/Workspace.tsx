@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import type { Workspace as Ws } from "../api/types";
 import { useStore } from "../store";
+import { connectFileEvents, disconnectFileEvents } from "../store/fileEvents";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import PaneSwitcher from "../components/PaneSwitcher";
 import StateBadge from "../components/StateBadge";
@@ -16,6 +17,8 @@ export default function Workspace() {
   const pane = useStore((s) => s.ui.pane);
   const setPane = useStore((s) => s.setPane);
   const conn = useStore((s) => s.terminal.conn);
+  const openWorkspaceTree = useStore((s) => s.openWorkspaceTree);
+  const closeWorkspaceTree = useStore((s) => s.closeWorkspaceTree);
   const cached = useStore((s) => s.workspaces.list.find((w) => w.id === id));
 
   const [ws, setWs] = useState<Ws | null>(cached ?? null);
@@ -35,8 +38,14 @@ export default function Workspace() {
     void load();
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [load]);
+    void openWorkspaceTree(id);
+    connectFileEvents(id);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      closeWorkspaceTree();
+      disconnectFileEvents();
+    };
+  }, [id, load, openWorkspaceTree, closeWorkspaceTree]);
 
   if (err) {
     return (

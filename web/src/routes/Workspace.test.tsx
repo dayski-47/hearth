@@ -27,6 +27,23 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+// The tree + events lifecycle now runs on mount; keep it inert in these tests.
+vi.mock("../store/fileEvents", () => ({
+  connectFileEvents: vi.fn(),
+  disconnectFileEvents: vi.fn(),
+}));
+
+// Every mount also fires GET .../files?path=; answer it with an empty listing
+// and route the workspace GET to `body`.
+function stubFetch(body: unknown, status = 200) {
+  globalThis.fetch = vi.fn(async (url: string) => {
+    if (String(url).includes("/files")) {
+      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify(body), { status });
+  }) as typeof fetch;
+}
+
 class FakeWS {
   static OPEN = 1;
   static CONNECTING = 0;
@@ -63,40 +80,28 @@ function mount(id = "a") {
 
 test("running workspace renders the terminal pane", async () => {
   vi.stubGlobal("WebSocket", FakeWS as unknown as typeof WebSocket);
-  globalThis.fetch = vi.fn(
-    async () =>
-      new Response(
-        JSON.stringify({
-          id: "a",
-          name: "scratch",
-          image: "x",
-          state: "running",
-          host_id: "local",
-          created_at: "2026-01-01T00:00:00Z",
-        }),
-        { status: 200 },
-      ),
-  ) as typeof fetch;
+  stubFetch({
+    id: "a",
+    name: "scratch",
+    image: "x",
+    state: "running",
+    host_id: "local",
+    created_at: "2026-01-01T00:00:00Z",
+  });
   mount();
   await screen.findByRole("button", { name: "Terminal" });
   expect(document.querySelector(".term-pane")).not.toBeNull();
 });
 
 test("stopped workspace disables the terminal with a hint", async () => {
-  globalThis.fetch = vi.fn(
-    async () =>
-      new Response(
-        JSON.stringify({
-          id: "a",
-          name: "s",
-          image: "x",
-          state: "stopped",
-          host_id: "local",
-          created_at: "2026-01-01T00:00:00Z",
-        }),
-        { status: 200 },
-      ),
-  ) as typeof fetch;
+  stubFetch({
+    id: "a",
+    name: "s",
+    image: "x",
+    state: "stopped",
+    host_id: "local",
+    created_at: "2026-01-01T00:00:00Z",
+  });
   mount();
   expect(
     await screen.findByText(/Start the workspace to open a terminal/),
@@ -104,20 +109,14 @@ test("stopped workspace disables the terminal with a hint", async () => {
 });
 
 test("a still-creating workspace shows an alert and a link home", async () => {
-  globalThis.fetch = vi.fn(
-    async () =>
-      new Response(
-        JSON.stringify({
-          id: "a",
-          name: "s",
-          image: "x",
-          state: "creating",
-          host_id: "local",
-          created_at: "2026-01-01T00:00:00Z",
-        }),
-        { status: 200 },
-      ),
-  ) as typeof fetch;
+  stubFetch({
+    id: "a",
+    name: "s",
+    image: "x",
+    state: "creating",
+    host_id: "local",
+    created_at: "2026-01-01T00:00:00Z",
+  });
   mount();
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "still being created",
@@ -128,10 +127,7 @@ test("a still-creating workspace shows an alert and a link home", async () => {
 });
 
 test("404 shows a message and a link home", async () => {
-  globalThis.fetch = vi.fn(
-    async () =>
-      new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
-  ) as typeof fetch;
+  stubFetch({ error: "not found" }, 404);
   mount("nope");
   expect(await screen.findByRole("alert")).toHaveTextContent("not found");
   expect(
