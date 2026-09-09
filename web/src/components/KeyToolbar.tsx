@@ -42,9 +42,13 @@ export default function KeyToolbar({
     if (label === "Ctrl") return setCtrl((v) => !v);
     if (label === "Alt") return setAlt((v) => !v);
     let seq = SEQ[label] ?? label;
-    if (ctrl && label.length === 1) {
-      const c = label.toLowerCase().charCodeAt(0);
-      if (c >= 97 && c <= 122) seq = String.fromCharCode(c - 96);
+    if (ctrl) {
+      // Ctrl only combines with a letter; for anything else (Esc, an arrow)
+      // it just sends the key. Either way the latch clears.
+      if (label.length === 1) {
+        const c = label.toLowerCase().charCodeAt(0);
+        if (c >= 97 && c <= 122) seq = String.fromCharCode(c - 96);
+      }
       setCtrl(false);
     }
     if (alt) {

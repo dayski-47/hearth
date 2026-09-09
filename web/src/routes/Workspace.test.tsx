@@ -103,6 +103,30 @@ test("stopped workspace disables the terminal with a hint", async () => {
   ).toBeInTheDocument();
 });
 
+test("a still-creating workspace shows an alert and a link home", async () => {
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          id: "a",
+          name: "s",
+          image: "x",
+          state: "creating",
+          host_id: "local",
+          created_at: "2026-01-01T00:00:00Z",
+        }),
+        { status: 200 },
+      ),
+  ) as typeof fetch;
+  mount();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "still being created",
+  );
+  expect(
+    screen.getByRole("link", { name: "Back to workspaces" }),
+  ).toBeInTheDocument();
+});
+
 test("404 shows a message and a link home", async () => {
   globalThis.fetch = vi.fn(
     async () =>

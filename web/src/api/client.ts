@@ -68,8 +68,8 @@ export async function postAllowing<T>(
   const data = await parse<T>(res);
   if (!res.ok && !allow.includes(res.status)) {
     const message =
-      (data as { error?: string } | null)?.error ??
-      res.statusText ??
+      (data as { error?: string } | null)?.error ||
+      res.statusText ||
       `HTTP ${res.status}`;
     throw new ApiError(res.status, message);
   }

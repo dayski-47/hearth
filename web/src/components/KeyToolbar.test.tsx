@@ -18,3 +18,12 @@ test("sticky Ctrl then c sends ^C and clears", async () => {
   expect(onKey).toHaveBeenCalledWith("\x03");
   expect(screen.getByRole("button", { name: "Ctrl" })).not.toHaveClass("sticky");
 });
+
+test("sticky Ctrl then a multi-char key clears the latch", async () => {
+  const onKey = vi.fn();
+  render(<KeyToolbar onKey={onKey} />);
+  await userEvent.click(screen.getByRole("button", { name: "Ctrl" }));
+  await userEvent.click(screen.getByRole("button", { name: "Esc" }));
+  expect(onKey).toHaveBeenCalledWith("\x1b");
+  expect(screen.getByRole("button", { name: "Ctrl" })).not.toHaveClass("sticky");
+});

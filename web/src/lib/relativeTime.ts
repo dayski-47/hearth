@@ -1,6 +1,6 @@
 export function relativeTime(iso: string, now: Date = new Date()): string {
-  const then = new Date(iso).getTime();
-  const secs = Math.round((now.getTime() - then) / 1000);
+  const date = new Date(iso);
+  const secs = Math.round((now.getTime() - date.getTime()) / 1000);
   if (secs < 45) return "just now";
   const mins = Math.round(secs / 60);
   if (mins < 60) return `${mins}m ago`;
@@ -8,7 +8,7 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, {
+  return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   });
