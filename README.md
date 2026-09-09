@@ -6,8 +6,9 @@ terminal and editor running inside an isolated container on that server. There
 is nothing to install on the machine you are sitting at.
 
 > **Status:** early development, in progress. The pieces listed below work and
-> there is a bare browser page that logs in and opens a terminal, but the real
-> UI is not built and Hearth is not ready for daily use.
+> there is a React UI that logs in, manages workspaces, and opens a terminal,
+> but the file tree and editor are not built and Hearth is not ready for daily
+> use.
 
 ## Key features
 
@@ -35,7 +36,7 @@ is nothing to install on the machine you are sitting at.
 - **Gateway:** Go, chi, pgx, sqlc, goose, Postgres, `log/slog`.
 - **Data plane:** Rust, tokio, tonic, bollard, Podman.
 - **Between services:** gRPC and protobuf over mutual TLS.
-- **Frontend:** a bare vanilla xterm.js page today; a React editor later.
+- **Frontend:** React, TypeScript, Vite, Zustand, xterm.js.
 
 ## How it fits together
 
@@ -67,7 +68,7 @@ image, network lockdown).
 - [x] Admin login, sessions, CSRF, per-IP login rate limiting
 - [x] Workspace lifecycle over the REST API, with a reconciliation loop
 - [x] Terminal transport: a gateway WebSocket bridged to a container PTY
-- [x] A bare browser page: log in, pick a workspace, get a terminal
+- [x] A browser page: log in, pick a workspace, get a terminal
 - [x] File operations: list, read, write, create, rename, delete, over REST
 - [x] Live file-change events streamed to the browser over a WebSocket
 - [x] `docker-compose` and Caddy deploy on a single host
