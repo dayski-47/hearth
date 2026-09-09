@@ -172,7 +172,7 @@ func (d *FileDeps) writeContent(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if rerr != nil {
-			http.Error(w, "read body", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "read body")
 			return
 		}
 	}
@@ -227,7 +227,7 @@ func (d *FileDeps) rename(w http.ResponseWriter, r *http.Request) {
 	defer closer.Close()
 	var body struct{ From, To string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if _, err := c.RenameNode(r.Context(), &hv1.RenameNodeRequest{WorkspaceId: wid, From: body.From, To: body.To}); err != nil {

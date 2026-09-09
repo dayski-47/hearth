@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -407,6 +409,64 @@ func TestFilesErrorCarriesMessage(t *testing.T) {
 	}
 	if !strings.Contains(out.Error, "escapes") {
 		t.Fatalf("error body: want the gRPC message, got %q", out.Error)
+	}
+}
+
+func TestFilesRenameBadJSONReturnsStructuredError(t *testing.T) {
+	srv, _ := newFilesServer(t)
+
+	resp := do(t, http.MethodPost, filesURL(srv.URL, fileRunningID, "/rename"), strings.NewReader("not json"))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Error == "" {
+		t.Fatalf("want a JSON error body, got %+v", out)
+	}
+}
+
+func TestFilesWriteBodyReadErrorReturnsStructuredError(t *testing.T) {
+	srv, _ := newFilesServer(t)
+
+	// Send a chunked request body, then half-close before the terminating
+	// chunk so the handler's r.Body.Read returns io.ErrUnexpectedEOF.
+	base := strings.TrimPrefix(srv.URL, "http://")
+	conn, err := net.Dial("tcp", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	req := fmt.Sprintf("PUT /api/workspaces/%s/files/content?path=a.txt HTTP/1.1\r\n"+
+		"Host: %s\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n",
+		fileRunningID, base)
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Error == "" {
+		t.Fatalf("want a JSON error body, got %+v", out)
 	}
 }
 
