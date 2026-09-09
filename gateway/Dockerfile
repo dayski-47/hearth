@@ -21,13 +21,17 @@ RUN buf generate \
  && cd gateway && CGO_ENABLED=0 GOFLAGS=-trimpath \
       go build -ldflags='-s -w' -o /out/hearth-gateway ./cmd/hearth-gateway
 
-# The bare terminal page (Phase 4b) ships with the gateway.
-COPY web /out/web
+FROM node:22-bookworm AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web ./
+RUN npm run build
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/hearth-gateway /app/hearth-gateway
-COPY --from=build /out/web /app/web
+COPY --from=web /web/dist /app/web
 ENV HEARTH_WEB_DIR=/app/web
 EXPOSE 8080 9090
 ENTRYPOINT ["/app/hearth-gateway"]

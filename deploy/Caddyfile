@@ -1,3 +1,5 @@
 {$HEARTH_DOMAIN} {
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
 	reverse_proxy gateway:8080
 }
