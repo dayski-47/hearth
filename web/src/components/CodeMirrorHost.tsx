@@ -11,7 +11,7 @@ export interface CodeMirrorHostProps {
   language: string;
   onReady: () => void;
   onDirtyChange: (dirty: boolean) => void;
-  onSave: (text: string) => void;
+  onSave: (text: string) => Promise<void>;
 }
 
 /**
@@ -90,10 +90,20 @@ export default function CodeMirrorHost({
           preventDefault: true,
           run: (v) => {
             const text = v.state.doc.toString();
-            saved.text = text;
-            if (timer) clearTimeout(timer);
-            cbs.current.onDirtyChange(false);
-            cbs.current.onSave(text);
+            // Only move the baseline and clear the dirty flag once the write
+            // actually lands: a rejected save must leave the tab dirty so the
+            // edits are not silently lost on close.
+            void cbs.current.onSave(text).then(
+              () => {
+                saved.text = text;
+                if (timer) clearTimeout(timer);
+                cbs.current.onDirtyChange(false);
+              },
+              () => {
+                // Save failed; keep `saved.text` and the dirty marker as they
+                // were. EditorPane surfaces the error to the user.
+              },
+            );
             return true;
           },
         },

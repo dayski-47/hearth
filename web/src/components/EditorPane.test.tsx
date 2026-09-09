@@ -88,21 +88,64 @@ test("a dirty tab shows the unsaved dot", async () => {
   expect(document.querySelector(".et-dot")).not.toBeNull();
 });
 
-test("Ctrl-S writes the buffer through the file API and clears dirty", async () => {
-  seed([tab({ dirty: true })]);
+test("edit -> dirty -> Ctrl-S -> write -> clean is the full cycle", async () => {
+  seed([tab()]);
   await mountWithEditor();
   const content = document.querySelector(".cm-content") as HTMLElement;
   content.focus();
+
+  await userEvent.type(content, "x");
+  await waitFor(() =>
+    expect(useStore.getState().editor.tabs[0].dirty).toBe(true),
+  );
+  expect(document.querySelector(".et-dot")).not.toBeNull();
+
   await userEvent.keyboard("{Control>}s{/Control}");
   await waitFor(() => expect(writeFileContent).toHaveBeenCalledTimes(1));
+  // The edited buffer, not the original, is what gets written.
   expect(writeFileContent).toHaveBeenCalledWith(
     "ws1",
     "src/main.ts",
-    "const a = 1;\n",
+    expect.stringMatching(/^xconst a = 1;/),
   );
+
   await waitFor(() =>
     expect(useStore.getState().editor.tabs[0].dirty).toBe(false),
   );
+  await waitFor(() =>
+    expect(document.querySelector(".et-dot")).toBeNull(),
+  );
+});
+
+test("a failed save keeps the tab dirty and warns the user", async () => {
+  const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+  vi.mocked(writeFileContent).mockRejectedValueOnce(new Error("disk full"));
+  seed([tab()]);
+  await mountWithEditor();
+  const content = document.querySelector(".cm-content") as HTMLElement;
+  content.focus();
+
+  await userEvent.type(content, "x");
+  await waitFor(() =>
+    expect(useStore.getState().editor.tabs[0].dirty).toBe(true),
+  );
+
+  await userEvent.keyboard("{Control>}s{/Control}");
+  await waitFor(() => expect(writeFileContent).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(alertSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Could not save main.ts"),
+    ),
+  );
+
+  // The write rejected: the dirty marker and the dot must survive so the
+  // edits are not silently dropped on close.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 200));
+  });
+  expect(useStore.getState().editor.tabs[0].dirty).toBe(true);
+  expect(document.querySelector(".et-dot")).not.toBeNull();
+  alertSpy.mockRestore();
 });
 
 test("the close button removes the tab", async () => {

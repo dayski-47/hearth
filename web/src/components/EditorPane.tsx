@@ -39,9 +39,11 @@ export default function EditorPane() {
       markDirty(path, false);
       recordSaved(path, text);
     } catch (e) {
-      // Keep the buffer and the dirty marker; just tell the user it failed.
+      // Tell the user, then re-throw so CodeMirrorHost keeps the tab dirty and
+      // its saved baseline unchanged - the edits must not look committed.
       const msg = e instanceof Error ? e.message : "could not save the file";
       alert(`Could not save ${basename(path)}: ${msg}`);
+      throw e;
     }
   }
 
@@ -94,7 +96,7 @@ export default function EditorPane() {
                 language={t.language}
                 onReady={() => consumeInitialDoc(t.path)}
                 onDirtyChange={(d) => markDirty(t.path, d)}
-                onSave={(text) => void save(t.path, text)}
+                onSave={(text) => save(t.path, text)}
               />
             </Suspense>
           )}

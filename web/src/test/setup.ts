@@ -21,6 +21,35 @@ HTMLCanvasElement.prototype.getContext = (() => ({
   createLinearGradient: () => ({ addColorStop: () => {} }),
 })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 
+// jsdom's Range implements no layout, so it has neither getClientRects nor
+// getBoundingClientRect. CodeMirror measures text by range whenever the doc
+// changes; give it empty rects so the measure pass is a no-op instead of a
+// throw.
+const emptyRect = () => ({
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+  toJSON: () => ({}),
+});
+if (typeof Range !== "undefined") {
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = function getClientRects() {
+      return Object.assign([], {
+        item: () => null,
+      }) as unknown as DOMRectList;
+    };
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect =
+      emptyRect as unknown as () => DOMRect;
+  }
+}
+
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
     ({
