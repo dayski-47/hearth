@@ -1,10 +1,19 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { beforeEach, expect, test, vi } from "vitest";
+import { useStore } from "./store";
 import App from "./App";
 
 const future = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
 
-test("renders the dashboard route", () => {
+beforeEach(() => {
+  useStore.setState({
+    auth: { status: "authed", username: "admin" },
+    checkMe: vi.fn().mockResolvedValue(undefined),
+  });
+});
+
+test("renders the dashboard route when authed", () => {
   render(
     <MemoryRouter initialEntries={["/"]} future={future}>
       <App />
@@ -13,11 +22,12 @@ test("renders the dashboard route", () => {
   expect(screen.getByText("Dashboard")).toBeInTheDocument();
 });
 
-test("unknown route redirects to dashboard", () => {
+test("shows the login overlay when anon", () => {
+  useStore.setState({ auth: { status: "anon", username: null } });
   render(
-    <MemoryRouter initialEntries={["/nope"]} future={future}>
+    <MemoryRouter initialEntries={["/"]} future={future}>
       <App />
     </MemoryRouter>,
   );
-  expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Log in" })).toBeInTheDocument();
 });

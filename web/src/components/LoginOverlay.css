@@ -1,0 +1,18 @@
+.login-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(280px, 90vw);
+}
+.login-err {
+  color: var(--err);
+  min-height: 1.2em;
+  font: var(--mono);
+}
