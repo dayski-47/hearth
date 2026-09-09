@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { TerminalSocket } from "../api/terminalSocket";
-import type { WorkspaceState } from "../api/types";
 import { useStore } from "../store";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import KeyToolbar from "./KeyToolbar";
@@ -12,11 +11,9 @@ import "./TerminalPane.css";
 export default function TerminalPane({
   workspaceId,
   visible,
-  workspaceState,
 }: {
   workspaceId: string;
   visible: boolean;
-  workspaceState: WorkspaceState;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sockRef = useRef<TerminalSocket | null>(null);
@@ -27,8 +24,6 @@ export default function TerminalPane({
   const showKeys = useMediaQuery("(max-width: 900px)");
   const [hasOpened, setHasOpened] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
-
-  const running = workspaceState === "running";
 
   useEffect(() => {
     const term = new Terminal({
@@ -89,14 +84,6 @@ export default function TerminalPane({
     };
   }, [workspaceId, setConn]);
 
-  // Close the socket the moment the workspace leaves "running" while the pane
-  // is still mounted (Workspace refetches its state on window focus).
-  // Reconnecting is pointless: the gateway refuses the upgrade for a
-  // non-running workspace.
-  useEffect(() => {
-    if (!running) sockRef.current?.close();
-  }, [running]);
-
   // Coming back from hidden, the host went from 0x0 to a measured box. The
   // ResizeObserver should catch that, but jsdom never fires it and real
   // browsers can coalesce the two size changes; an explicit refit on the
@@ -117,9 +104,6 @@ export default function TerminalPane({
   let barErr = false;
   if (gaveUp) {
     bar = "disconnected - reload to retry";
-    barErr = true;
-  } else if (!running) {
-    bar = `terminal closed - workspace is ${workspaceState}`;
     barErr = true;
   } else if (!hasOpened) {
     // First handshake (gateway -> agent -> podman exec) is not instant. Stay

@@ -121,9 +121,6 @@ jobs:
 
       - name: Web golden path
         run: |
-          go build -o /tmp/hearth-gateway ./gateway/cmd/hearth-gateway
-          # bring up a minimal stack the way gateway/tests do via bootStack once it exists;
-          # until then, run the compose stack:
           npm --prefix web ci
           npx --prefix web playwright install --with-deps chromium
           printf 'admin\nhearthdeploy\nlocalhost\n' | just setup --force

@@ -40,6 +40,7 @@ test("expanding a directory calls toggleDir once", async () => {
   render(<FileTree onOpen={() => {}} />);
   await userEvent.click(screen.getByText("src"));
   expect(toggleDir).toHaveBeenCalledWith("src");
+  expect(toggleDir).toHaveBeenCalledTimes(1);
 });
 
 test("clicking a file calls onOpen with its path", async () => {

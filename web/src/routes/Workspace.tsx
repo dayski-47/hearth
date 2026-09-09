@@ -102,7 +102,6 @@ export default function Workspace() {
     <TerminalPane
       workspaceId={ws.id}
       visible={narrow ? pane === "terminal" : termVisible}
-      workspaceState={ws.state}
     />
   ) : (
     <div className="pane pane-term">

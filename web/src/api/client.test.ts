@@ -68,6 +68,15 @@ test("postAllowing still throws on a non-2xx not in allow", async () => {
   } satisfies Partial<ApiError>);
 });
 
+test("a bodyless non-2xx falls back to HTTP <status> when statusText is empty", async () => {
+  // HTTP/2 responses carry no reason phrase, so res.statusText is "".
+  mockFetch(() => new Response(null, { status: 500, statusText: "" }));
+  await expect(postAllowing("/api/x", {}, [502])).rejects.toMatchObject({
+    status: 500,
+    message: "HTTP 500",
+  } satisfies Partial<ApiError>);
+});
+
 test("concurrent GETs to the same path share one request", async () => {
   let calls = 0;
   mockFetch(() => {

@@ -62,6 +62,7 @@ export function connectFileEvents(workspaceId: string): void {
 
 export function disconnectFileEvents(): void {
   clearTimeout(timer);
+  timer = undefined;
   pending.length = 0;
   sock?.close();
   sock = undefined;

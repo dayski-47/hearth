@@ -1,4 +1,3 @@
-/* eslint-env node */
 import { test, expect } from "@playwright/test";
 
 const USER = process.env.HEARTH_E2E_USER ?? "admin";
@@ -75,9 +74,6 @@ test("login, create a workspace, use the terminal and the editor", async ({
   await expect(term).toContainText("v1 v2", { timeout: 10_000 });
 
   // Clean up: back to the dashboard, then destroy the workspace.
-  page.on("dialog", (d) => {
-    void d.accept();
-  });
   await page.locator("a.back").click();
   await card.getByRole("button", { name: "Destroy" }).click();
   await expect(page.locator(".ws-card", { hasText: "golden" })).toHaveCount(0, {

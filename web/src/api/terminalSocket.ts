@@ -1,5 +1,6 @@
 import { BackoffSocket } from "./backoffSocket";
 import { encodeResize, encodeStdin } from "./wireCodec";
+import { wsProto } from "./wsUrl";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -22,7 +23,7 @@ export class TerminalSocket {
   constructor(workspaceId: string, h: Handlers) {
     this.bs = new BackoffSocket(
       () => {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
+        const proto = wsProto();
         return `${proto}://${location.host}/api/workspaces/${workspaceId}/terminal?cols=${this.cols}&rows=${this.rows}`;
       },
       {

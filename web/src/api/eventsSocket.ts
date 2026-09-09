@@ -1,5 +1,6 @@
 import { BackoffSocket } from "./backoffSocket";
 import type { ConnState } from "./terminalSocket";
+import { wsProto } from "./wsUrl";
 
 export interface FileEvent {
   path: string;
@@ -20,7 +21,7 @@ export class EventsSocket {
   constructor(workspaceId: string, o: Opts) {
     this.bs = new BackoffSocket(
       () => {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
+        const proto = wsProto();
         return `${proto}://${location.host}/api/workspaces/${workspaceId}/events`;
       },
       {
