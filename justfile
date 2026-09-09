@@ -50,3 +50,20 @@ install-services:
 
 uninstall-services:
     bash deploy/systemd/install.sh --uninstall
+
+e2e-web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf 'admin\nhearthdeploy\nlocalhost\n' | just setup --force
+    docker compose -f deploy/docker-compose.yml up -d --build
+    sudo ufw allow from 10.7.0.0/24 to any port 9091,9092 proto tcp 2>/dev/null || true
+    just install-services
+    cleanup() {
+      podman rm -f $(podman ps -aq --filter name=hearth-ws-) 2>/dev/null || true
+      podman volume rm $(podman volume ls -q --filter name=hearth-ws-) 2>/dev/null || true
+      just uninstall-services
+      docker compose -f deploy/docker-compose.yml down -v
+    }
+    trap cleanup EXIT
+    npx --prefix web playwright install --with-deps chromium
+    HEARTH_E2E_URL=https://localhost npm --prefix web run e2e

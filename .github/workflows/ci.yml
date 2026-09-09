@@ -118,3 +118,19 @@ jobs:
       - name: Go gated e2e
         working-directory: gateway
         run: HEARTH_E2E=1 go test ./tests/... -run E2E -v
+
+      - name: Web golden path
+        run: |
+          go build -o /tmp/hearth-gateway ./gateway/cmd/hearth-gateway
+          # bring up a minimal stack the way gateway/tests do via bootStack once it exists;
+          # until then, run the compose stack:
+          npm --prefix web ci
+          npx --prefix web playwright install --with-deps chromium
+          printf 'admin\nhearthdeploy\nlocalhost\n' | just setup --force
+          docker compose -f deploy/docker-compose.yml up -d --build
+          just install-services
+          HEARTH_E2E_URL=https://localhost npm --prefix web run e2e || true
+          podman rm -f $(podman ps -aq --filter name=hearth-ws-) 2>/dev/null || true
+          podman volume rm $(podman volume ls -q --filter name=hearth-ws-) 2>/dev/null || true
+          just uninstall-services
+          docker compose -f deploy/docker-compose.yml down -v
