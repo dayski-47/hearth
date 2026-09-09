@@ -88,6 +88,70 @@ test("the sentinel frame refetches every expanded directory", () => {
   expect(spy).toHaveBeenCalledTimes(1);
 });
 
+function seedTab(over: Partial<import("./editor").EditorTab> = {}) {
+  useStore.setState({
+    editor: {
+      workspaceId: "ws1",
+      activePath: "a.txt",
+      tabs: [
+        {
+          path: "a.txt",
+          language: "plaintext",
+          dirty: false,
+          loaded: true,
+          deletedOnDisk: false,
+          changedOnDisk: false,
+          openError: null,
+          initialDoc: null,
+          reloadNonce: 0,
+          ...over,
+        },
+      ],
+    },
+  });
+}
+
+test("the sentinel frame also rechecks the open editor tabs", () => {
+  vi.spyOn(useStore.getState(), "treeRefetchExpanded").mockResolvedValue();
+  const spy = vi
+    .spyOn(useStore.getState(), "recheckOpenTabs")
+    .mockResolvedValue();
+  applyFileEvent({ path: "", kind: "KIND_UNSPECIFIED" });
+  expect(spy).toHaveBeenCalledTimes(1);
+});
+
+test("MODIFIED on a clean open tab reloads it silently", () => {
+  seedTab();
+  const spy = vi.spyOn(useStore.getState(), "reloadTab").mockResolvedValue();
+  applyFileEvent({ path: "a.txt", kind: "MODIFIED" });
+  expect(spy).toHaveBeenCalledWith("a.txt");
+});
+
+test("MODIFIED on a dirty open tab flags it changed on disk", () => {
+  seedTab({ dirty: true });
+  const reload = vi.spyOn(useStore.getState(), "reloadTab").mockResolvedValue();
+  const changed = vi.spyOn(useStore.getState(), "markChangedOnDisk");
+  applyFileEvent({ path: "a.txt", kind: "MODIFIED" });
+  expect(reload).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenCalledWith("a.txt", true);
+});
+
+test("REMOVED on a clean open tab closes it", () => {
+  seedTab();
+  const close = vi.spyOn(useStore.getState(), "closeTab");
+  applyFileEvent({ path: "a.txt", kind: "REMOVED" });
+  expect(close).toHaveBeenCalledWith("a.txt");
+});
+
+test("REMOVED on a dirty open tab marks it deleted, keeping the tab", () => {
+  seedTab({ dirty: true });
+  const close = vi.spyOn(useStore.getState(), "closeTab");
+  const del = vi.spyOn(useStore.getState(), "markDeleted");
+  applyFileEvent({ path: "a.txt", kind: "REMOVED" });
+  expect(close).not.toHaveBeenCalled();
+  expect(del).toHaveBeenCalledWith("a.txt");
+});
+
 test("a burst of events within the debounce window is one coalesced flush", () => {
   vi.useFakeTimers();
   const insert = vi.spyOn(useStore.getState(), "treeInsert");

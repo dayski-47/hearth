@@ -18,6 +18,8 @@ export default function EditorPane() {
   const consumeInitialDoc = useStore((s) => s.consumeInitialDoc);
   const recordSaved = useStore((s) => s.recordSaved);
   const retryOpen = useStore((s) => s.retryOpen);
+  const reloadTab = useStore((s) => s.reloadTab);
+  const markChangedOnDisk = useStore((s) => s.markChangedOnDisk);
 
   if (tabs.length === 0) {
     return (
@@ -79,6 +81,22 @@ export default function EditorPane() {
 
       {tabs.map((t) => (
         <div key={t.path} className="editor-body" hidden={t.path !== activePath}>
+          {t.deletedOnDisk && (
+            <div className="editor-bar" role="status">
+              This file was deleted on disk. Save to recreate it.
+            </div>
+          )}
+          {t.changedOnDisk && (
+            <div className="editor-bar" role="status">
+              Changed on disk.{" "}
+              <button onClick={() => void reloadTab(t.path)}>
+                Reload, lose edits
+              </button>{" "}
+              <button onClick={() => markChangedOnDisk(t.path, false)}>
+                Keep mine
+              </button>
+            </div>
+          )}
           {t.openError ? (
             <div className="editor-error" role="alert">
               <p>{t.openError}</p>
@@ -91,6 +109,7 @@ export default function EditorPane() {
               fallback={<div className="editor-loading">Loading the editor...</div>}
             >
               <CodeMirrorHost
+                key={`${t.path}#${t.reloadNonce}`}
                 path={t.path}
                 initialDoc={t.initialDoc ?? ""}
                 language={t.language}

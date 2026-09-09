@@ -6,7 +6,7 @@ export function applyFileEvent(e: FileEvent): void {
   const s = useStore.getState();
   if (e.path === "" && e.kind === "KIND_UNSPECIFIED") {
     void s.treeRefetchExpanded();
-    // TASK 6: also re-check open editor tabs against disk.
+    void s.recheckOpenTabs();
     return;
   }
   switch (e.kind) {
@@ -19,14 +19,24 @@ export function applyFileEvent(e: FileEvent): void {
         modified_unix: Math.floor(Date.now() / 1000),
       });
       break;
-    case "REMOVED":
+    case "REMOVED": {
       s.treeRemove(e.path);
-      // TASK 6: close / mark the editor tab for e.path.
+      const tab = s.editor.tabs.find((t) => t.path === e.path);
+      if (tab) {
+        if (tab.dirty) s.markDeleted(e.path);
+        else s.closeTab(e.path);
+      }
       break;
-    case "MODIFIED":
+    }
+    case "MODIFIED": {
       s.treeTouch(e.path);
-      // TASK 6: silent reload (clean) / "changed on disk" (dirty) for e.path.
+      const tab = s.editor.tabs.find((t) => t.path === e.path);
+      if (tab) {
+        if (tab.dirty) s.markChangedOnDisk(e.path, true);
+        else void s.reloadTab(e.path);
+      }
       break;
+    }
   }
 }
 

@@ -96,7 +96,10 @@ export default function CodeMirrorHost({
             void cbs.current.onSave(text).then(
               () => {
                 saved.text = text;
-                if (timer) clearTimeout(timer);
+                // Do not cancel a pending dirty re-eval here: if the user typed
+                // in the ~150 ms since Ctrl-S, that timer must still fire and
+                // compare against the new baseline. A stale timer firing
+                // `doc !== saved.text` is self-correcting either way.
                 cbs.current.onDirtyChange(false);
               },
               () => {

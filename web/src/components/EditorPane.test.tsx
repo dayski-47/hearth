@@ -20,6 +20,7 @@ const tab = (over: Partial<EditorTab> = {}): EditorTab => ({
   changedOnDisk: false,
   openError: null,
   initialDoc: "const a = 1;\n",
+  reloadNonce: 0,
   ...over,
 });
 
@@ -146,6 +147,44 @@ test("a failed save keeps the tab dirty and warns the user", async () => {
   expect(useStore.getState().editor.tabs[0].dirty).toBe(true);
   expect(document.querySelector(".et-dot")).not.toBeNull();
   alertSpy.mockRestore();
+});
+
+test("a changed-on-disk tab shows the reload bar", async () => {
+  seed([tab({ changedOnDisk: true })]);
+  await mountWithEditor();
+  const bar = screen.getByRole("status");
+  expect(bar).toHaveTextContent("Changed on disk.");
+  expect(
+    screen.getByRole("button", { name: "Reload, lose edits" }),
+  ).toBeInTheDocument();
+});
+
+test("Keep mine dismisses the changed-on-disk bar", async () => {
+  seed([tab({ changedOnDisk: true })]);
+  await mountWithEditor();
+  await userEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+  expect(useStore.getState().editor.tabs[0].changedOnDisk).toBe(false);
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+test("Reload, lose edits calls reloadTab for the tab", async () => {
+  const spy = vi
+    .spyOn(useStore.getState(), "reloadTab")
+    .mockResolvedValue();
+  seed([tab({ changedOnDisk: true })]);
+  await mountWithEditor();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Reload, lose edits" }),
+  );
+  expect(spy).toHaveBeenCalledWith("src/main.ts");
+});
+
+test("a deleted-on-disk tab shows its bar", async () => {
+  seed([tab({ deletedOnDisk: true })]);
+  await mountWithEditor();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "This file was deleted on disk. Save to recreate it.",
+  );
 });
 
 test("the close button removes the tab", async () => {

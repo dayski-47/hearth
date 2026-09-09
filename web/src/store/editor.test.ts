@@ -142,6 +142,51 @@ test("recordSaved clears the dirty and deleted flags", async () => {
   expect(t.deletedOnDisk).toBe(false);
 });
 
+test("reloadTab swaps in the fresh text, bumps the nonce and clears the flags", async () => {
+  mockText("old");
+  await useStore.getState().openFile("a.txt");
+  useStore.getState().markDirty("a.txt", true);
+  useStore.getState().markChangedOnDisk("a.txt", true);
+  useStore.getState().consumeInitialDoc("a.txt");
+  const nonce0 = useStore.getState().editor.tabs[0].reloadNonce;
+
+  mockText("fresh from disk");
+  await useStore.getState().reloadTab("a.txt");
+
+  const t = useStore.getState().editor.tabs[0];
+  expect(t.initialDoc).toBe("fresh from disk");
+  expect(t.loaded).toBe(true);
+  expect(t.dirty).toBe(false);
+  expect(t.changedOnDisk).toBe(false);
+  expect(t.deletedOnDisk).toBe(false);
+  expect(t.openError).toBeNull();
+  expect(t.reloadNonce).toBe(nonce0 + 1);
+});
+
+test("reloadTab on a vanished file marks the tab deleted", async () => {
+  mockText("old");
+  await useStore.getState().openFile("a.txt");
+  mockText("not found", 404);
+  await useStore.getState().reloadTab("a.txt");
+  expect(useStore.getState().editor.tabs[0].deletedOnDisk).toBe(true);
+});
+
+test("recheckOpenTabs reloads clean tabs and flags dirty ones", async () => {
+  mockText("x");
+  await useStore.getState().openFile("clean.txt");
+  await useStore.getState().openFile("dirty.txt");
+  useStore.getState().markDirty("dirty.txt", true);
+
+  mockText("reloaded");
+  await useStore.getState().recheckOpenTabs();
+
+  const [clean, dirty] = useStore.getState().editor.tabs;
+  expect(clean.initialDoc).toBe("reloaded");
+  expect(clean.reloadNonce).toBe(1);
+  expect(dirty.changedOnDisk).toBe(true);
+  expect(dirty.dirty).toBe(true);
+});
+
 test("setActiveWorkspace resets the tabs when the id changes", async () => {
   mockText("x");
   useStore.getState().setActiveWorkspace("ws1");

@@ -97,6 +97,31 @@
   white-space: pre-wrap;
 }
 
+.editor-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+}
+.editor-bar button {
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 8px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.editor-bar button:hover {
+  border-color: var(--warn);
+}
+
 .cm-host {
   flex: 1;
   min-height: 0;

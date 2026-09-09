@@ -14,6 +14,8 @@ export interface EditorTab {
   openError: string | null;
   /** The fetched text, handed to the editor once and then released. */
   initialDoc: string | null;
+  /** Bumped on every disk reload so the editor host re-mounts with fresh text. */
+  reloadNonce: number;
 }
 
 export interface EditorSlice {
@@ -29,6 +31,8 @@ export interface EditorSlice {
   markDirty: (path: string, dirty: boolean) => void;
   markDeleted: (path: string) => void;
   markChangedOnDisk: (path: string, v: boolean) => void;
+  reloadTab: (path: string) => Promise<void>;
+  recheckOpenTabs: () => Promise<void>;
   consumeInitialDoc: (path: string) => void;
   recordSaved: (path: string, text: string) => void;
   setActiveWorkspace: (id: string) => void;
@@ -86,6 +90,7 @@ export const createEditorSlice: StateCreator<
         changedOnDisk: false,
         openError: null,
         initialDoc: null,
+        reloadNonce: 0,
       };
       set((s) => ({
         editor: { ...s.editor, tabs: [...s.editor.tabs, tab], activePath: path },
@@ -128,6 +133,37 @@ export const createEditorSlice: StateCreator<
     },
     markChangedOnDisk(path, v) {
       patch(path, { changedOnDisk: v });
+    },
+
+    async reloadTab(path) {
+      const { workspaceId } = get().editor;
+      const tab = get().editor.tabs.find((t) => t.path === path);
+      if (!tab) return;
+      try {
+        const text = await readFileContent(workspaceId ?? "", path);
+        patch(path, {
+          initialDoc: text,
+          loaded: true,
+          dirty: false,
+          changedOnDisk: false,
+          deletedOnDisk: false,
+          openError: null,
+          reloadNonce: tab.reloadNonce + 1,
+        });
+      } catch (e) {
+        if (e instanceof ApiError) get().markDeleted(path);
+        else patch(path, { openError: "could not reload the file" });
+      }
+    },
+
+    async recheckOpenTabs() {
+      const paths = get().editor.tabs.map((t) => t.path);
+      for (const path of paths) {
+        const tab = get().editor.tabs.find((t) => t.path === path);
+        if (!tab) continue;
+        if (tab.dirty) get().markChangedOnDisk(path, true);
+        else await get().reloadTab(path);
+      }
     },
     consumeInitialDoc(path) {
       patch(path, { initialDoc: null });
