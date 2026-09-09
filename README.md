@@ -6,9 +6,10 @@ terminal and editor running inside an isolated container on that server. There
 is nothing to install on the machine you are sitting at.
 
 > **Status:** early development, in progress. The pieces listed below work and
-> there is a React UI that logs in, manages workspaces, and opens a terminal,
-> but the file tree and editor are not built and Hearth is not ready for daily
-> use.
+> there is a React UI that logs in, manages workspaces, opens a terminal, and
+> now has a file tree and a CodeMirror editor. What is left before daily use is
+> reconnect and session resume (the next roadmap item) and the rest of the
+> roadmap below.
 
 ## Key features
 
@@ -74,5 +75,5 @@ image, network lockdown).
 - [x] `docker-compose` and Caddy deploy on a single host
 - [x] A pinned workspace base image and dependency, secret, and image scanning in CI
 - [x] A React workspace UI with lifecycle controls and the terminal
-- [ ] A file tree and an editor
+- [x] A file tree and an editor
 - [ ] Reconnect and session resume
