@@ -1,0 +1,36 @@
+.ws-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-raised);
+}
+.ws-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.ws-card h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.ws-meta {
+  color: var(--text-dim);
+  font: var(--mono);
+  margin: 6px 0 10px;
+}
+.ws-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-block;
+  text-decoration: none;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+}
+.btn:hover {
+  border-color: var(--accent);
+}

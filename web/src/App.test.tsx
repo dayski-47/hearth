@@ -10,6 +10,8 @@ beforeEach(() => {
   useStore.setState({
     auth: { status: "authed", username: "admin" },
     checkMe: vi.fn().mockResolvedValue(undefined),
+    startPolling: vi.fn(),
+    stopPolling: vi.fn(),
   });
 });
 
@@ -19,7 +21,7 @@ test("renders the dashboard route when authed", () => {
       <App />
     </MemoryRouter>,
   );
-  expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
 });
 
 test("shows the login overlay when anon", () => {

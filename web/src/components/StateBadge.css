@@ -1,0 +1,33 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--mono);
+  color: var(--text-dim);
+}
+.badge i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge.ok {
+  color: var(--ok);
+}
+.badge.err {
+  color: var(--err);
+}
+.badge.warn {
+  color: var(--warn);
+}
+.badge.dim i {
+  background: var(--text-dim);
+}
+.badge.pulse i {
+  animation: badge-pulse 1.2s ease-in-out infinite;
+}
+@keyframes badge-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}

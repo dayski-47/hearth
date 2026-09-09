@@ -1,0 +1,33 @@
+.dash {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px;
+}
+.dash-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.dash-head .spacer {
+  flex: 1;
+}
+.dash-head .who {
+  color: var(--text-dim);
+}
+.dash-error {
+  color: var(--err);
+}
+.dash-dim {
+  color: var(--text-dim);
+}
+.ws-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+@media (max-width: 600px) {
+  .ws-grid {
+    grid-template-columns: 1fr;
+  }
+}
