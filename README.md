@@ -72,5 +72,6 @@ image, network lockdown).
 - [x] Live file-change events streamed to the browser over a WebSocket
 - [x] `docker-compose` and Caddy deploy on a single host
 - [x] A pinned workspace base image and dependency, secret, and image scanning in CI
+- [x] A React workspace UI with lifecycle controls and the terminal
 - [ ] A file tree and an editor
 - [ ] Reconnect and session resume
