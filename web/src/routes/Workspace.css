@@ -1,0 +1,56 @@
+.ws-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.ws-msg {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-dim);
+}
+.ws-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ws-top .back {
+  text-decoration: none;
+  font-size: 18px;
+}
+.ws-top .spacer {
+  flex: 1;
+}
+.ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ws-body.wide .pane-files {
+  width: 220px;
+  border-right: 1px solid var(--border);
+}
+.ws-body.wide .center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pane {
+  padding: 10px;
+  color: var(--text-dim);
+  overflow: auto;
+}
+.pane-editor {
+  flex: 1;
+}
+.pane-term {
+  border-top: 1px solid var(--border);
+  min-height: 160px;
+  background: #101216;
+}
+.ws-body:not(.wide) .pane {
+  flex: 1;
+}

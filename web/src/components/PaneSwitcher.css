@@ -1,0 +1,15 @@
+.pane-switch {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.pane-switch button {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+}
+.pane-switch button.active {
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
