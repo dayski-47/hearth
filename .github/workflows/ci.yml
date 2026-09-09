@@ -85,7 +85,7 @@ jobs:
         with: { go-version: "1.27" }
       - uses: dtolnay/rust-toolchain@1.98.0
 
-      - name: Start a rootless Podman service
+      - name: Start a Podman service
         run: |
           export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
           mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null \

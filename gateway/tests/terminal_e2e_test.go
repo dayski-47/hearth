@@ -45,7 +45,7 @@ func (d wsDialer) Dial(addr string) (hv1.WorkspaceIoClient, io.Closer, error) {
 	return workspaceclient.Dial(addr, d.tls)
 }
 
-// TestTerminalE2E boots the whole terminal path against real rootless Podman: a
+// TestTerminalE2E boots the whole terminal path against real Podman: a
 // real hearth-workspace, a real hearth-agent, and an in-process gateway (gRPC +
 // HTTP). It creates a busybox workspace over the REST API, opens the browser
 // terminal WebSocket, and checks that `echo` round-trips through the container

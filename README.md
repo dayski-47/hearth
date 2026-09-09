@@ -33,7 +33,7 @@ is nothing to install on the machine you are sitting at.
 ## Tech stack
 
 - **Gateway:** Go, chi, pgx, sqlc, goose, Postgres, `log/slog`.
-- **Data plane:** Rust, tokio, tonic, bollard, rootless Podman.
+- **Data plane:** Rust, tokio, tonic, bollard, Podman.
 - **Between services:** gRPC and protobuf over mutual TLS.
 - **Frontend:** a bare vanilla xterm.js page today; a React editor later.
 
@@ -48,7 +48,7 @@ data-plane line:
   traffic to the data plane.
 - **`hearth-agent`** (Rust) runs on every worker host. It is the only thing that
   creates, starts, stops, and destroys workspace containers there, under a
-  hardened rootless-Podman profile.
+  hardened Podman profile.
 - **`hearth-workspace`** (Rust) also runs on every worker host. It handles the
   high-frequency work inside a running container: terminal sessions, file
   operations, and a filesystem watch that streams change events out.

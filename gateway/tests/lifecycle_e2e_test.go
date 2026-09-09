@@ -1,5 +1,5 @@
 // Package e2e holds the gated end-to-end proof that the whole workspace
-// lifecycle stack works: a real hearth-agent against real rootless Podman, a
+// lifecycle stack works: a real hearth-agent against real Podman, a
 // real gateway (gRPC + HTTP) in-process, and the REST API driving a busybox
 // workspace whose container and volume are then observed directly with Podman.
 //

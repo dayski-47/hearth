@@ -1,6 +1,6 @@
 //! Real Podman round trip for the workspace lifecycle. Gated: HEARTH_PODMAN_IT=1.
 //!
-//! Requires a working rootless podman socket and `docker.io/library/busybox:stable`
+//! Requires a working podman socket and `docker.io/library/busybox:stable`
 //! reachable. Run with:
 //!   HEARTH_PODMAN_IT=1 HEARTH_PODMAN_SOCKET=/run/user/1001/podman/podman.sock \
 //!     cargo test -p hearth-agent --test lifecycle_smoke -- --nocapture

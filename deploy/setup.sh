@@ -11,7 +11,7 @@ fi
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "docker compose v2 is required" >&2; exit 1; }
-command -v podman >/dev/null || echo "warning: podman not found - the host data plane needs rootless podman" >&2
+command -v podman >/dev/null || echo "warning: podman not found - the host data plane needs podman" >&2
 
 echo "== Hearth setup =="
 read -rp "Admin username [admin]: " admin_user

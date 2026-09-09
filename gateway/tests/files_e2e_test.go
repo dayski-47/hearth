@@ -31,7 +31,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// TestFilesE2E boots the whole file path against real rootless Podman: a real
+// TestFilesE2E boots the whole file path against real Podman: a real
 // hearth-workspace reading and writing the container volume directly, a real
 // hearth-agent, and an in-process gateway (gRPC + HTTP). It creates a busybox
 // workspace over the REST API, then writes, lists, reads, renames, and deletes

@@ -34,8 +34,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// TestFileEventsE2E boots the whole file-events path against real rootless
-// Podman: a real hearth-workspace watching the container volume, a real
+// TestFileEventsE2E boots the whole file-events path against real Podman: a
+// real hearth-workspace watching the container volume, a real
 // hearth-agent, and an in-process gateway (gRPC + HTTP). It creates a busybox
 // workspace over the REST API, opens the browser events WebSocket, changes a
 // file on the volume through the file API, and checks the change is delivered

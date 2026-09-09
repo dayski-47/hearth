@@ -1,4 +1,4 @@
-//! Requires a working rootless podman socket and `docker.io/library/busybox:latest`
+//! Requires a working podman socket and `docker.io/library/busybox:latest`
 //! pulled locally. Run with:
 //!   HEARTH_PODMAN_IT=1 cargo test -p hearth-agent --test engine_smoke -- --nocapture
 //!

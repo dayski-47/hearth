@@ -1,7 +1,7 @@
 //! Gated smoke test: drive the six file RPCs end to end against a real volume.
 //!
 //! Needs a container engine whose volumes live on a path this process can also
-//! touch directly (rootless podman). Set `HEARTH_PODMAN_IT=1` to run it and
+//! touch directly (podman). Set `HEARTH_PODMAN_IT=1` to run it and
 //! `HEARTH_PODMAN_SOCKET` to point at the socket.
 //!
 //! The service takes a client-streaming `WriteFile`, which can only be fed
