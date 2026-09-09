@@ -1,10 +1,13 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import LoginOverlay from "./components/LoginOverlay";
 import { setUnauthorizedHandler } from "./api/client";
 import { useStore } from "./store";
 import Dashboard from "./routes/Dashboard";
-import Workspace from "./routes/Workspace";
+
+// The workspace view pulls in xterm (~73 KB gz). Keep it out of the initial
+// bundle so login and the dashboard load without paying for it.
+const Workspace = lazy(() => import("./routes/Workspace"));
 
 export default function App() {
   const status = useStore((s) => s.auth.status);
@@ -23,7 +26,14 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
-      <Route path="/w/:id" element={<Workspace />} />
+      <Route
+        path="/w/:id"
+        element={
+          <Suspense fallback={null}>
+            <Workspace />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
