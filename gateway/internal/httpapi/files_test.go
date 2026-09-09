@@ -68,6 +68,9 @@ func (m *memFS) ListDir(_ context.Context, req *hv1.ListDirRequest) (*hv1.ListDi
 		}
 		entries = append(entries, &hv1.Node{Path: p, Name: name, Size: uint64(len(b))})
 	}
+	if req.Path == "" {
+		entries = append(entries, &hv1.Node{Path: "sub", Name: "sub", IsDir: true})
+	}
 	return &hv1.ListDirResponse{Entries: entries}, nil
 }
 
@@ -339,6 +342,71 @@ func TestFilesWrongOwner(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}
+
+type shapeEntry struct {
+	Path         string  `json:"path"`
+	Name         string  `json:"name"`
+	IsDir        *bool   `json:"is_dir"`
+	Size         *uint64 `json:"size"`
+	ModifiedUnix *int64  `json:"modified_unix"`
+}
+
+func TestFilesListShapeIsExplicit(t *testing.T) {
+	srv, mem := newFilesServer(t)
+	mem.files["a.txt"] = []byte{} // empty file
+
+	resp := do(t, http.MethodGet, filesURL(srv.URL, fileRunningID, "?path="), nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Entries []shapeEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v (body %q)", err, body)
+	}
+	var file, dir *shapeEntry
+	for i := range out.Entries {
+		switch out.Entries[i].Path {
+		case "a.txt":
+			file = &out.Entries[i]
+		case "sub":
+			dir = &out.Entries[i]
+		}
+	}
+	if file == nil || dir == nil {
+		t.Fatalf("want a.txt + sub, got %+v", out.Entries)
+	}
+	if file.IsDir == nil || *file.IsDir {
+		t.Errorf("a.txt is_dir: want present+false, got %v", file.IsDir)
+	}
+	if file.Size == nil {
+		t.Errorf("a.txt size: want present (0), got nil")
+	}
+	if dir.IsDir == nil || !*dir.IsDir {
+		t.Errorf("sub is_dir: want present+true, got %v", dir.IsDir)
+	}
+}
+
+func TestFilesErrorCarriesMessage(t *testing.T) {
+	srv, _ := newFilesServer(t)
+
+	// a "../" path -> memFS beneath() -> InvalidArgument "path escapes workspace"
+	resp := do(t, http.MethodGet, filesURL(srv.URL, fileRunningID, "/content?path=../x"), nil)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v (body %q)", err, body)
+	}
+	if !strings.Contains(out.Error, "escapes") {
+		t.Fatalf("error body: want the gRPC message, got %q", out.Error)
 	}
 }
 

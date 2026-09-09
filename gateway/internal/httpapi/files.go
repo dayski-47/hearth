@@ -46,20 +46,39 @@ func (d *FileDeps) client(w http.ResponseWriter, r *http.Request) (hv1.Workspace
 	return c, closer, store.UUIDString(ws.ID), true
 }
 
-// grpcToHTTP maps a workspace RPC error onto the closest HTTP status.
+// grpcToHTTP maps a workspace RPC error onto the closest HTTP status and writes
+// the gRPC status message as a JSON {"error": ...} body, so the browser can
+// show why a file operation failed (too large, escapes the workspace, is a
+// directory, ...). The status message is written by the workspace service.
 func grpcToHTTP(w http.ResponseWriter, err error) {
-	switch status.Code(err) {
+	st := status.Convert(err)
+	code := http.StatusBadGateway
+	switch st.Code() {
 	case codes.NotFound:
-		http.Error(w, "not found", http.StatusNotFound)
+		code = http.StatusNotFound
 	case codes.InvalidArgument:
-		http.Error(w, "bad request", http.StatusBadRequest)
+		code = http.StatusBadRequest
 	case codes.AlreadyExists:
-		http.Error(w, "already exists", http.StatusConflict)
+		code = http.StatusConflict
 	case codes.PermissionDenied:
-		http.Error(w, "permission denied", http.StatusForbidden)
-	default:
-		http.Error(w, "workspace call failed", http.StatusBadGateway)
+		code = http.StatusForbidden
 	}
+	msg := st.Message()
+	if msg == "" {
+		msg = "workspace call failed"
+	}
+	writeJSONError(w, code, msg)
+}
+
+// fileNode is the gateway's explicit shape for a directory entry. Marshalling
+// the protobuf Node directly drops is_dir, size, and modified_unix whenever
+// they are zero, so the browser cannot tell a 0-byte file from a directory.
+type fileNode struct {
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	IsDir        bool   `json:"is_dir"`
+	Size         uint64 `json:"size"`
+	ModifiedUnix int64  `json:"modified_unix"`
 }
 
 func (d *FileDeps) list(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +92,13 @@ func (d *FileDeps) list(w http.ResponseWriter, r *http.Request) {
 		grpcToHTTP(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": resp.Entries})
+	entries := make([]fileNode, 0, len(resp.Entries))
+	for _, n := range resp.Entries {
+		entries = append(entries, fileNode{
+			Path: n.Path, Name: n.Name, IsDir: n.IsDir, Size: n.Size, ModifiedUnix: n.ModifiedUnix,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
 func (d *FileDeps) readContent(w http.ResponseWriter, r *http.Request) {
