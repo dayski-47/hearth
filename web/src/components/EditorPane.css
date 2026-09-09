@@ -1,0 +1,110 @@
+.editor-pane.pane {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: #16181d;
+  color: var(--text);
+}
+
+.editor-empty.pane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.editor-tabs {
+  display: flex;
+  flex: none;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.et-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.et-tab:hover {
+  color: var(--text);
+}
+.et-tab.active {
+  color: var(--text);
+  background: #16181d;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.et-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.et-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.et-x {
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+.et-x:hover {
+  color: var(--text);
+  background: var(--bg-input);
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.editor-body[hidden] {
+  display: none !important;
+}
+
+.editor-error,
+.editor-loading {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.editor-error {
+  color: var(--err);
+}
+.editor-error p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.cm-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.cm-host .cm-editor {
+  height: 100%;
+}
+.cm-host .cm-scroller {
+  overflow: auto;
+}

@@ -37,6 +37,25 @@ export default defineConfig({
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
           xterm: ["@xterm/xterm", "@xterm/addon-fit"],
+          codemirror: [
+            "@codemirror/state",
+            "@codemirror/view",
+            "@codemirror/commands",
+            "@codemirror/language",
+            "@codemirror/theme-one-dark",
+          ],
+        },
+        // The CodeMirror language packs are pulled in only by dynamic import()
+        // in CodeMirrorHost, so Rollup already splits each into its own async
+        // chunk; give those chunks a readable `lang-*` name (their source
+        // module is a bare `index.js`, which would otherwise collide).
+        chunkFileNames(info) {
+          const id = info.facadeModuleId ?? "";
+          const pack = id.match(/@codemirror\/lang-([a-z]+)/);
+          if (pack) return `assets/lang-${pack[1]}-[hash].js`;
+          const legacy = id.match(/@codemirror\/legacy-modes\/mode\/([a-z]+)/);
+          if (legacy) return `assets/lang-${legacy[1]}-[hash].js`;
+          return "assets/[name]-[hash].js";
         },
       },
     },

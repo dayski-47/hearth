@@ -5,6 +5,7 @@ import type { Workspace as Ws } from "../api/types";
 import { useStore } from "../store";
 import { connectFileEvents, disconnectFileEvents } from "../store/fileEvents";
 import { useMediaQuery } from "../lib/useMediaQuery";
+import EditorPane from "../components/EditorPane";
 import FileTree from "../components/FileTree";
 import PaneSwitcher from "../components/PaneSwitcher";
 import StateBadge from "../components/StateBadge";
@@ -20,6 +21,9 @@ export default function Workspace() {
   const conn = useStore((s) => s.terminal.conn);
   const openWorkspaceTree = useStore((s) => s.openWorkspaceTree);
   const closeWorkspaceTree = useStore((s) => s.closeWorkspaceTree);
+  const openFile = useStore((s) => s.openFile);
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace);
+  const closeWorkspaceEditor = useStore((s) => s.closeWorkspaceEditor);
   const cached = useStore((s) => s.workspaces.list.find((w) => w.id === id));
 
   const [ws, setWs] = useState<Ws | null>(cached ?? null);
@@ -40,13 +44,22 @@ export default function Workspace() {
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
     void openWorkspaceTree(id);
+    setActiveWorkspace(id);
     connectFileEvents(id);
     return () => {
       window.removeEventListener("focus", onFocus);
       closeWorkspaceTree();
+      closeWorkspaceEditor();
       disconnectFileEvents();
     };
-  }, [id, load, openWorkspaceTree, closeWorkspaceTree]);
+  }, [
+    id,
+    load,
+    openWorkspaceTree,
+    closeWorkspaceTree,
+    setActiveWorkspace,
+    closeWorkspaceEditor,
+  ]);
 
   if (err) {
     return (
@@ -75,14 +88,13 @@ export default function Workspace() {
 
   const filesPane = (
     <FileTree
-      onOpen={() => {
-        // Task 5 wires openFile(path); for now the visible effect on a narrow
-        // layout is switching to the editor pane.
+      onOpen={(path) => {
         if (narrow) setPane("editor");
+        void openFile(path);
       }}
     />
   );
-  const editorPane = <div className="pane pane-editor">Editor (Stage B)</div>;
+  const editorPane = <EditorPane />;
   // Mounted once the workspace is running and kept mounted while it stays
   // running, so hiding the pane (top-bar toggle or the narrow pane switcher)
   // never tears down the shell session. Visibility is CSS-only below.
