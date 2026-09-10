@@ -13,7 +13,7 @@ class FakeWS {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  onmessage: ((e: { data: ArrayBuffer }) => void) | null = null;
+  onmessage: ((e: { data: unknown }) => void) | null = null;
   sent: ArrayBuffer[] = [];
   constructor(url: string) {
     this.url = url;
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -84,6 +85,8 @@ test("an unexpected close triggers a backoff reconnect", () => {
 });
 
 test("backoff doubles per close, caps at 5000, and resets after an open", () => {
+  // Pin the jitter so the scheduled delay is exactly raw/2.
+  vi.spyOn(Math, "random").mockReturnValue(0);
   const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
   s.connect(1, 1);
   FakeWS.last!.open();
@@ -97,14 +100,14 @@ test("backoff doubles per close, caps at 5000, and resets after an open", () => 
     expect(FakeWS.last).not.toBe(prev);
   };
 
-  step(1000);
-  step(2000);
-  step(4000);
-  step(5000); // min(8000, 5000)
-  step(5000); // stays capped
+  step(500); // raw 1000
+  step(1000); // raw 2000
+  step(2000); // raw 4000
+  step(2500); // raw min(8000, 5000)
+  step(2500); // stays capped
 
   FakeWS.last!.open(); // a successful open resets the backoff
-  step(1000);
+  step(500);
 });
 
 test("gives up reconnecting after the retry cap", () => {
@@ -125,6 +128,84 @@ test("gives up reconnecting after the retry cap", () => {
 
   vi.advanceTimersByTime(60_000);
   expect(FakeWS.last).toBe(settled);
+});
+
+test("a ready control frame calls onReady and is not forwarded as data", () => {
+  const onData = vi.fn();
+  const onReady = vi.fn();
+  const s = new TerminalSocket("abc", { onData, onState: () => {}, onReady });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+  FakeWS.last!.onmessage?.({ data: '{"t":"ready","resumed":true}' });
+  expect(onReady).toHaveBeenCalledWith(true);
+  expect(onData).not.toHaveBeenCalled();
+});
+
+test("a ready frame with resumed:false reports false", () => {
+  const onReady = vi.fn();
+  const s = new TerminalSocket("abc", {
+    onData: () => {},
+    onState: () => {},
+    onReady,
+  });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+  FakeWS.last!.onmessage?.({ data: '{"t":"ready","resumed":false}' });
+  expect(onReady).toHaveBeenCalledWith(false);
+});
+
+test("binary frames still reach onData", () => {
+  const onData = vi.fn();
+  const s = new TerminalSocket("abc", { onData, onState: () => {} });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+  FakeWS.last!.onmessage?.({ data: new Uint8Array([1, 2, 3]).buffer });
+  expect(onData).toHaveBeenCalledTimes(1);
+  expect(Array.from(onData.mock.calls[0][0])).toEqual([1, 2, 3]);
+});
+
+test("malformed control text is swallowed", () => {
+  const onData = vi.fn();
+  const onReady = vi.fn();
+  const s = new TerminalSocket("abc", { onData, onState: () => {}, onReady });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+  expect(() => FakeWS.last!.onmessage?.({ data: "{not json" })).not.toThrow();
+  expect(onData).not.toHaveBeenCalled();
+  expect(onReady).not.toHaveBeenCalled();
+});
+
+test("a control frame that is not ready is ignored", () => {
+  const onData = vi.fn();
+  const onReady = vi.fn();
+  const s = new TerminalSocket("abc", { onData, onState: () => {}, onReady });
+  s.connect(1, 1);
+  FakeWS.last!.open();
+  FakeWS.last!.onmessage?.({ data: '{"t":"pong"}' });
+  expect(onData).not.toHaveBeenCalled();
+  expect(onReady).not.toHaveBeenCalled();
+});
+
+test("retry revives the socket after it has given up", () => {
+  const onGiveUp = vi.fn();
+  const onState = vi.fn();
+  const s = new TerminalSocket("abc", {
+    onData: () => {},
+    onState,
+    onGiveUp,
+  });
+  s.connect(1, 1);
+  for (let i = 0; i < 8; i++) {
+    FakeWS.last!.close();
+    vi.advanceTimersByTime(5000);
+  }
+  expect(onGiveUp).toHaveBeenCalledTimes(1);
+  const dead = FakeWS.last;
+
+  s.retry();
+  expect(FakeWS.last).not.toBe(dead);
+  FakeWS.last!.open();
+  expect(onState).toHaveBeenLastCalledWith("open");
 });
 
 test("close() prevents reconnect", () => {

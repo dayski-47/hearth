@@ -80,10 +80,24 @@ export class BackoffSocket {
         this.o.onGiveUp?.();
         return;
       }
-      this.retry = setTimeout(() => this.spawn(), this.backoff);
+      // Spread the retry over [raw/2, raw] so a gateway restart does not get a
+      // thundering herd of reconnects landing in the same millisecond.
+      const raw = Math.min(this.backoff, 5000);
+      const delay = raw / 2 + Math.random() * (raw / 2);
+      this.retry = setTimeout(() => this.spawn(), delay);
       this.backoff = Math.min(this.backoff * 2, 5000);
     };
     ws.onerror = () => ws.close();
+  }
+
+  // Restart from a clean slate after the reconnect budget was spent. The UI
+  // wires this to a "retry" button shown once onGiveUp has fired.
+  retryNow() {
+    this.closedByUs = false;
+    this.attempts = 0;
+    this.backoff = 1000;
+    clearTimeout(this.retry);
+    this.spawn();
   }
 
   close() {

@@ -10,6 +10,9 @@ interface Handlers {
   // Fired once when the reconnect budget is spent: no more attempts will be
   // made and the caller has to build a fresh socket (a page reload) to retry.
   onGiveUp?: () => void;
+  // The gateway sends {"t":"ready","resumed":bool} as a text frame once the
+  // shell is attached; resumed is true when it re-attached an existing session.
+  onReady?: (resumed: boolean) => void;
 }
 
 // The workspace terminal stream: a binary WebSocket carrying the tagged stdin
@@ -30,7 +33,18 @@ export class TerminalSocket {
         binaryType: "arraybuffer",
         onState: h.onState,
         onGiveUp: h.onGiveUp,
-        onMessage: (e) => h.onData(new Uint8Array(e.data as ArrayBuffer)),
+        onMessage: (e) => {
+          if (typeof e.data === "string") {
+            try {
+              const m = JSON.parse(e.data) as { t?: string; resumed?: boolean };
+              if (m.t === "ready") h.onReady?.(Boolean(m.resumed));
+            } catch {
+              // not a control frame
+            }
+            return;
+          }
+          h.onData(new Uint8Array(e.data as ArrayBuffer));
+        },
       },
     );
   }
@@ -51,6 +65,10 @@ export class TerminalSocket {
     this.rows = rows;
     const ws = this.bs.socket;
     if (ws?.readyState === WebSocket.OPEN) ws.send(encodeResize(cols, rows));
+  }
+
+  retry() {
+    this.bs.retryNow();
   }
 
   close() {
