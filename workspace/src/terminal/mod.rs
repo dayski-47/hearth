@@ -5,6 +5,7 @@ mod ring;
 
 pub use registry::{ExecControl, TerminalRegistry};
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,7 +16,6 @@ use hearth_proto::hearth::v1::{
 };
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
-use tokio::sync::Notify;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
@@ -69,19 +69,19 @@ enum ClientEnd {
 /// Forward live PTY output to one client until it goes away, is booted by a
 /// newer attach, or the shell exits.
 ///
-/// `biased` with the boot arm first is load-bearing: when a re-attach swaps
-/// the session's sender, this client's `frames_rx` also closes, which looks
-/// exactly like a shell exit. The boot permit is set before that swap, so
-/// polling it first tells the two apart.
+/// When `frames_rx` closes it could mean either "a re-attach swapped this
+/// client's sender out" or "the shell exited". `booted` is the authority:
+/// `attach` sets it before it drops the old sender, so the check here is
+/// order-independent - a spurious `Exit` to a booted client is impossible
+/// even if the select resolves the `recv` arm on the same poll the notify
+/// would have landed on.
 async fn forward_to_client(
     out_tx: mpsc::Sender<Result<TerminalServerFrame, Status>>,
     mut frames_rx: mpsc::Receiver<Vec<u8>>,
-    boot: Arc<Notify>,
+    booted: Arc<AtomicBool>,
 ) -> ClientEnd {
     loop {
         tokio::select! {
-            biased;
-            _ = boot.notified() => return ClientEnd::Booted,
             _ = out_tx.closed() => return ClientEnd::Detached,
             chunk = frames_rx.recv() => match chunk {
                 Some(bytes) => {
@@ -94,6 +94,9 @@ async fn forward_to_client(
                     }
                 }
                 None => {
+                    if booted.load(Ordering::SeqCst) {
+                        return ClientEnd::Booted;
+                    }
                     let _ = out_tx
                         .send(frame(ServerMsg::Exit(TerminalExit {
                             exit_code: -1,
@@ -147,7 +150,13 @@ pub async fn open(
         .map_err(|e| Status::internal(format!("attach terminal: {e:#}")))?;
 
     let session_id = now_session_id();
-    tracing::info!(%container, %session_id, resumed = attached.resumed, "terminal attached");
+    tracing::info!(
+        %container,
+        %session_id,
+        epoch = attached.epoch,
+        resumed = attached.resumed,
+        "terminal attached"
+    );
 
     let (tx, rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(64);
 
@@ -160,17 +169,22 @@ pub async fn open(
     .await
     .map_err(|_| Status::internal("client hung up"))?;
 
-    // Replay the scrollback before live output.
+    // The replay is written into `tx` (64 slots) before this fn returns and
+    // hands the `ReceiverStream` to tonic, so nothing drains it yet. Safe
+    // only because `Ring` caps at 256 KiB, i.e. at most 8 of these 32 KiB
+    // frames; a ring past ~2 MiB would fill the channel and deadlock here.
     for chunk in attached.replay.chunks(32 * 1024) {
         let _ = tx.send(frame(ServerMsg::Stdout(chunk.to_vec()))).await;
     }
 
-    // One short lock to lift out everything the two client tasks need, so
-    // neither task holds a session `Arc` that could outlive a reap.
-    let (boot, input, exec_id) = {
-        let s = attached.session.lock().await;
-        (s.boot.clone(), s.input.clone(), s.exec_id.clone())
-    };
+    // Everything the two client tasks need was lifted out of the session
+    // under the slot lock inside `attach`; neither task locks or holds a
+    // session `Arc`, so neither can keep a reaped session alive.
+    let epoch = attached.epoch;
+    let booted = attached.booted;
+    let booted_detach = booted.clone();
+    let input = attached.input;
+    let exec_id = attached.exec_id;
 
     // Live output -> this client, until it leaves or is superseded.
     let frames_rx = attached.frames_rx;
@@ -178,14 +192,14 @@ pub async fn open(
     let reg_serve = reg.clone();
     let ws_serve = workspace_id.clone();
     tokio::spawn(async move {
-        match forward_to_client(out_tx, frames_rx, boot).await {
-            ClientEnd::Detached => reg_serve.detach(&ws_serve, grace).await,
-            ClientEnd::Booted | ClientEnd::ShellExited => {}
+        if forward_to_client(out_tx, frames_rx, booted).await == ClientEnd::Detached {
+            reg_serve
+                .detach(&ws_serve, epoch, booted_detach, grace)
+                .await;
         }
     });
 
-    // Client frames -> PTY stdin / resize. Only the PTY handles are needed,
-    // not a session `Arc`, so this task never keeps a reaped session alive.
+    // Client frames -> PTY stdin / resize.
     let resize_exec = exec.clone();
     tokio::spawn(async move {
         while let Some(f) = client.next().await {
@@ -227,6 +241,7 @@ mod tests {
 
     use tokio::time::timeout;
 
+    use super::registry::fake;
     use super::*;
 
     fn drain(rx: &mut mpsc::Receiver<Result<TerminalServerFrame, Status>>) -> (Vec<u8>, bool) {
@@ -247,9 +262,9 @@ mod tests {
         // An idle prompt: the pump never sends anything.
         let (_frames_tx, frames_rx) = mpsc::channel::<Vec<u8>>(4);
         let (out_tx, out_rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(4);
-        let boot = Arc::new(Notify::new());
+        let booted = Arc::new(AtomicBool::new(false));
 
-        let task = tokio::spawn(forward_to_client(out_tx, frames_rx, boot));
+        let task = tokio::spawn(forward_to_client(out_tx, frames_rx, booted));
 
         // Browser tab closes.
         drop(out_rx);
@@ -265,13 +280,13 @@ mod tests {
     async fn forward_to_client_forwards_output_then_reports_the_shell_exit() {
         let (frames_tx, frames_rx) = mpsc::channel::<Vec<u8>>(4);
         let (out_tx, mut out_rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(8);
-        let boot = Arc::new(Notify::new());
+        let booted = Arc::new(AtomicBool::new(false));
 
         frames_tx.send(b"hi".to_vec()).await.unwrap();
         frames_tx.send(b" there".to_vec()).await.unwrap();
         drop(frames_tx); // the shell exited
 
-        let end = forward_to_client(out_tx, frames_rx, boot).await;
+        let end = forward_to_client(out_tx, frames_rx, booted).await;
         assert_eq!(end, ClientEnd::ShellExited);
 
         let (stdout, saw_exit) = drain(&mut out_rx);
@@ -280,18 +295,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forward_to_client_boot_beats_a_closed_channel() {
+    async fn forward_to_client_is_quiet_when_booted() {
         let (frames_tx, frames_rx) = mpsc::channel::<Vec<u8>>(4);
         let (out_tx, mut out_rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(8);
-        let boot = Arc::new(Notify::new());
+        let booted = Arc::new(AtomicBool::new(true)); // a newer attach superseded us
 
-        // A re-attach: the permit is set, then the old sender is dropped.
-        boot.notify_one();
         drop(frames_tx);
 
-        let end = forward_to_client(out_tx, frames_rx, boot).await;
+        let end = forward_to_client(out_tx, frames_rx, booted).await;
         assert_eq!(end, ClientEnd::Booted);
         // A booted client gets no frame, in particular no Exit.
         assert!(out_rx.try_recv().is_err());
+    }
+
+    /// The whole boot path composed: attach a session, run `forward_to_client`
+    /// against its live channel, then attach again for the same workspace and
+    /// assert the first loop returns `Booted` with no `Exit` frame - even
+    /// though the re-attach is what closes its `frames_rx`.
+    #[tokio::test]
+    async fn a_reconnect_boots_the_first_client_without_an_exit_frame() {
+        let reg = TerminalRegistry::new();
+        let exec = fake::FakeExec::new();
+
+        let a1 = reg
+            .attach("w1", 80, 24, exec.clone(), move || async move {
+                Ok(fake::pty_idle())
+            })
+            .await
+            .unwrap();
+
+        let (out_tx, mut out_rx) = mpsc::channel::<Result<TerminalServerFrame, Status>>(8);
+        let booted = a1.booted.clone();
+        let frames_rx = a1.frames_rx;
+        let serve = tokio::spawn(forward_to_client(out_tx, frames_rx, booted));
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let _a2 = reg
+            .attach("w1", 80, 24, exec.clone(), || async {
+                panic!("re-attach must not start a new pty")
+            })
+            .await
+            .unwrap();
+
+        let end = timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("forward loop hung after the reconnect")
+            .expect("forward loop panicked");
+        assert_eq!(end, ClientEnd::Booted);
+        assert!(
+            out_rx.try_recv().is_err(),
+            "a booted client must not receive any frame"
+        );
     }
 }

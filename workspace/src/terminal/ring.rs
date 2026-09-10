@@ -30,10 +30,6 @@ impl Ring {
     pub fn snapshot(&self) -> Vec<u8> {
         self.buf.clone()
     }
-
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
 }
 
 #[cfg(test)]
