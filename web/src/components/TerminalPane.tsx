@@ -56,6 +56,9 @@ export default function TerminalPane({
         setConn(s);
         if (s === "connecting") {
           setGaveUp(false);
+          // The fresh-shell notice describes one connection cycle only; a new
+          // cycle starting means it no longer applies.
+          setFreshNotice(false);
           if (everOpened) {
             // A sub-second blip should not flash the bar; only show it once
             // the gap is long enough to notice.
@@ -98,7 +101,9 @@ export default function TerminalPane({
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         fit.fit();
-        sock.resize(term.cols, term.rows);
+        // A mid-layout measurement can propose ~0; the socket guards this too,
+        // but there is no reason to compute or send a frame we know is bad.
+        if (term.cols >= 2 && term.rows >= 2) sock.resize(term.cols, term.rows);
       }, 150);
     };
     const ro = new ResizeObserver(onResize);
@@ -129,7 +134,9 @@ export default function TerminalPane({
     const t = setTimeout(() => {
       fitRef.current?.fit();
       const term = termRef.current;
-      if (term) sockRef.current?.resize(term.cols, term.rows);
+      if (term && term.cols >= 2 && term.rows >= 2) {
+        sockRef.current?.resize(term.cols, term.rows);
+      }
     }, 0);
     return () => clearTimeout(t);
   }, [visible]);

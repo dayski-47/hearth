@@ -38,6 +38,7 @@ export class BackoffSocket {
     this.closedByUs = false;
     this.attempts = 0;
     this.backoff = 1000;
+    clearTimeout(this.retry);
     this.spawn();
   }
 

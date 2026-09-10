@@ -4,6 +4,20 @@ import { wsProto } from "./wsUrl";
 
 export type ConnState = "connecting" | "open" | "closed";
 
+// A terminal smaller than 2x2 is never real: it is a measurement taken before
+// the host element has laid out. The gateway clamps cols/rows into [1,1000],
+// so a 0 or 1 becomes a one-column PTY that mangles the shell's redraw.
+function validDims(cols: number, rows: number): boolean {
+  return (
+    Number.isFinite(cols) &&
+    Number.isFinite(rows) &&
+    cols >= 2 &&
+    rows >= 2 &&
+    cols <= 1000 &&
+    rows <= 1000
+  );
+}
+
 interface Handlers {
   onData: (bytes: Uint8Array) => void;
   onState: (s: ConnState) => void;
@@ -50,6 +64,13 @@ export class TerminalSocket {
   }
 
   connect(cols: number, rows: number) {
+    // The URL needs some cols/rows; a mid-layout mount can hand us ~0, so fall
+    // back to a sane 80x24 rather than connecting with a degenerate size that
+    // the gateway would clamp to a one-column PTY.
+    if (!validDims(cols, rows)) {
+      cols = 80;
+      rows = 24;
+    }
     this.cols = cols;
     this.rows = rows;
     this.bs.open();
@@ -61,6 +82,10 @@ export class TerminalSocket {
   }
 
   resize(cols: number, rows: number) {
+    // Drop a degenerate frame outright. FitAddon can propose ~0 columns while
+    // .term-host is still mid-layout; forwarded on, the gateway clamps it to a
+    // one-column PTY and the shell's redraw corrupts the screen and stdin.
+    if (!validDims(cols, rows)) return;
     this.cols = cols;
     this.rows = rows;
     const ws = this.bs.socket;

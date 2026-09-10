@@ -68,10 +68,31 @@ test("send frames stdin with the 0x00 tag", () => {
 
 test("resize frames with the 0x01 tag", () => {
   const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
-  s.connect(1, 1);
+  s.connect(80, 24);
   FakeWS.last!.open();
   s.resize(120, 40);
   expect(new Uint8Array(FakeWS.last!.sent[0])[0]).toBe(0x01);
+});
+
+test("a degenerate resize is never sent on the wire", () => {
+  const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
+  s.connect(80, 24);
+  FakeWS.last!.open();
+  s.resize(0, 24);
+  s.resize(1, 24);
+  s.resize(24, 1);
+  s.resize(NaN, NaN);
+  expect(FakeWS.last!.sent).toHaveLength(0);
+  s.resize(80, 24);
+  expect(FakeWS.last!.sent).toHaveLength(1);
+});
+
+test("connect with bad dims still opens, falling back to 80x24", () => {
+  const s = new TerminalSocket("abc", { onData: () => {}, onState: () => {} });
+  s.connect(0, 0);
+  expect(FakeWS.last?.url).toBe(
+    "wss://h/api/workspaces/abc/terminal?cols=80&rows=24",
+  );
 });
 
 test("an unexpected close triggers a backoff reconnect", () => {

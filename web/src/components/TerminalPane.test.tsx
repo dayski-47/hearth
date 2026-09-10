@@ -110,6 +110,26 @@ test("a reconnect into a fresh shell shows the notice until dismissed", () => {
   expect(screen.queryByText(/this is a new shell/i)).not.toBeInTheDocument();
 });
 
+test("a later reconnect clears a stale fresh-shell notice", () => {
+  mount();
+  open();
+
+  // First drop times out into a fresh shell; the user does not dismiss it.
+  drop();
+  advance(600);
+  open();
+  ready(false);
+  expect(screen.getByText(/this is a new shell/i)).toBeInTheDocument();
+
+  // A second blip: the next connecting cycle must drop the stale notice and
+  // show the reconnecting bar instead.
+  drop();
+  advance(600);
+  advance(1000);
+  expect(screen.queryByText(/this is a new shell/i)).not.toBeInTheDocument();
+  expect(screen.getByText("Reconnecting...")).toBeInTheDocument();
+});
+
 test("a resumed reconnect shows Reconnected and clears after the timeout", () => {
   mount();
   open();
