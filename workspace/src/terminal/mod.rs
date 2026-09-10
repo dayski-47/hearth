@@ -1,5 +1,10 @@
 //! The OpenTerminal handler.
 
+mod registry;
+mod ring;
+
+pub use registry::{ExecControl, TerminalRegistry};
+
 use std::sync::Arc;
 
 use futures_util::StreamExt;

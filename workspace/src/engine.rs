@@ -113,3 +113,10 @@ impl PodmanExec {
         Ok(inspect.exit_code.map(|c| c as i32))
     }
 }
+
+#[tonic::async_trait]
+impl crate::terminal::ExecControl for PodmanExec {
+    async fn resize(&self, id: &str, cols: u16, rows: u16) {
+        let _ = self.resize_terminal(id, cols, rows).await;
+    }
+}
