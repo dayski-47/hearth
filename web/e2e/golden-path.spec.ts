@@ -48,6 +48,17 @@ test("login, create a workspace, use the terminal and the editor", async ({
   await page.keyboard.type("echo hearth-ok\n");
   await expect(term).toContainText("hearth-ok", { timeout: 15_000 });
 
+  // The terminal survives a brief network drop: the shell is held for a
+  // grace window and the scrollback is replayed on reconnect.
+  await page.keyboard.type("echo before-blip\n");
+  await expect(term).toContainText("before-blip", { timeout: 10_000 });
+  await page.context().setOffline(true);
+  await page.waitForTimeout(1500);
+  await page.context().setOffline(false);
+  await expect(term).toContainText("before-blip", { timeout: 20_000 });
+  await page.keyboard.type("echo after-blip\n");
+  await expect(term).toContainText("after-blip", { timeout: 20_000 });
+
   // Write a file from the shell and watch it appear in the tree (the workspace
   // service watches the volume and pushes a create event over /events).
   await page.keyboard.type("printf 'v1' > note.txt\n");
