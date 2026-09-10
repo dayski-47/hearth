@@ -5,11 +5,13 @@ at a server you control, open a URL from any device, and log in to a real Linux
 terminal and editor running inside an isolated container on that server. There
 is nothing to install on the machine you are sitting at.
 
-> **Status:** early development, in progress. The pieces listed below work and
-> there is a React UI that logs in, manages workspaces, opens a terminal, and
-> now has a file tree and a CodeMirror editor. What is left before daily use is
-> reconnect and session resume (the next roadmap item) and the rest of the
-> roadmap below.
+> **Status:** early development, but the roadmap below is complete. The core
+> works end to end: log in from any device, manage workspaces, and use a
+> terminal and a CodeMirror editor that both survive a dropped connection.
+> What is left before you would run this unattended is operational hardening,
+> such as idle auto-stop, graceful handling of a worker host going down, and
+> the CI and security-scanner work. That is tracked separately and is not on
+> the list below. Treat this as a solo-admin v1.
 
 ## Key features
 
@@ -76,4 +78,4 @@ image, network lockdown).
 - [x] A pinned workspace base image and dependency, secret, and image scanning in CI
 - [x] A React workspace UI with lifecycle controls and the terminal
 - [x] A file tree and an editor
-- [ ] Reconnect and session resume
+- [x] Reconnect and session resume
