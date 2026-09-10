@@ -29,6 +29,17 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+// Capture the ResizeObserver callback so a test can fire a layout change.
+let roCallback: (() => void) | undefined;
+class FakeRO {
+  constructor(cb: () => void) {
+    roCallback = cb;
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 const sockets: FakeWS[] = [];
 
 class FakeWS {
@@ -42,10 +53,10 @@ class FakeWS {
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((e: { data: unknown }) => void) | null = null;
+  send = vi.fn();
   constructor() {
     sockets.push(this);
   }
-  send() {}
   close() {
     this.readyState = 3;
     this.onclose?.();
@@ -70,7 +81,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(Math, "random").mockReturnValue(0);
   vi.stubGlobal("WebSocket", FakeWS as unknown as typeof WebSocket);
+  vi.stubGlobal("ResizeObserver", FakeRO);
   sockets.length = 0;
+  roCallback = undefined;
   resetSpy.mockClear();
 });
 
@@ -191,4 +204,24 @@ test("a quick reopen never flashes the reconnecting bar", () => {
   open(); // opens before the 1000ms delay elapses
   advance(2000);
   expect(screen.queryByText("Reconnecting...")).not.toBeInTheDocument();
+});
+
+test("ignores a layout change for a beat after the socket opens", () => {
+  mount();
+  open();
+  const sock = latest();
+  advance(50); // let the visible-transition refit settle
+  sock.send.mockClear();
+
+  // xterm re-lays-out right after open; a resize measured now can be wrong,
+  // so a ResizeObserver fire inside the settle window is dropped.
+  act(() => roCallback?.());
+  advance(200); // past the 150ms debounce, still inside the 500ms window
+  expect(sock.send).not.toHaveBeenCalled();
+
+  // Once settled, a layout change does drive a resize frame.
+  advance(400);
+  act(() => roCallback?.());
+  advance(200);
+  expect(sock.send).toHaveBeenCalled();
 });

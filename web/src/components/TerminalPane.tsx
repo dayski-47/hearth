@@ -26,6 +26,11 @@ export default function TerminalPane({
   const [reconnected, setReconnected] = useState(false);
   const [freshNotice, setFreshNotice] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
+  // Wall-clock time before which a measured terminal size is not to be trusted:
+  // the flex layout and xterm both settle for a few frames after the pane
+  // mounts or after term.reset() on a reconnect. Shared by the resize observer
+  // and the visible-transition refit.
+  const settledAfterRef = useRef(0);
 
   useEffect(() => {
     const term = new Terminal({
@@ -49,6 +54,12 @@ export default function TerminalPane({
     let openedAsReconnect = false;
     let reconnectingTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectedTimer: ReturnType<typeof setTimeout> | undefined;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    // A size measured in the settle window can be transiently wrong; pushing it
+    // to the PTY wraps the shell's redraw into a stripe of garbage. Ignore
+    // measured sizes until settledAfterRef, and take one deliberate measurement
+    // 500ms after every open.
+    settledAfterRef.current = Date.now() + 500;
 
     const sock = new TerminalSocket(workspaceId, {
       onData: (bytes) => term.write(bytes),
@@ -73,6 +84,15 @@ export default function TerminalPane({
           openedAsReconnect = everOpened;
           if (everOpened) term.reset();
           everOpened = true;
+          // Hold off on trusting a measured size, then take one on purpose.
+          settledAfterRef.current = Date.now() + 500;
+          clearTimeout(settleTimer);
+          settleTimer = setTimeout(() => {
+            fit.fit();
+            if (term.cols >= 2 && term.rows >= 2) {
+              sock.resize(term.cols, term.rows);
+            }
+          }, 500);
         }
       },
       onGiveUp: () => setGaveUp(true),
@@ -100,6 +120,7 @@ export default function TerminalPane({
     const onResize = () => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
+        if (Date.now() < settledAfterRef.current) return;
         fit.fit();
         // A mid-layout measurement can propose ~0; the socket guards this too,
         // but there is no reason to compute or send a frame we know is bad.
@@ -113,6 +134,7 @@ export default function TerminalPane({
       clearTimeout(debounce);
       clearTimeout(reconnectingTimer);
       clearTimeout(reconnectedTimer);
+      clearTimeout(settleTimer);
       ro.disconnect();
       onData.dispose();
       sock.close();
@@ -131,13 +153,18 @@ export default function TerminalPane({
   // dimensions.
   useEffect(() => {
     if (!visible) return;
+    // Let the newly shown box settle before measuring it; a size read mid
+    // transition can be wrong and would resize the PTY badly. Skip entirely
+    // while the socket is still in its own post-open settle window (the effect
+    // above takes a deliberate measurement then).
     const t = setTimeout(() => {
+      if (Date.now() < settledAfterRef.current) return;
       fitRef.current?.fit();
       const term = termRef.current;
       if (term && term.cols >= 2 && term.rows >= 2) {
         sockRef.current?.resize(term.cols, term.rows);
       }
-    }, 0);
+    }, 350);
     return () => clearTimeout(t);
   }, [visible]);
 
