@@ -32,13 +32,27 @@ pub fn load() -> Result<Config> {
             cert: req("HEARTH_WORKSPACE_TLS_CERT")?,
             key: req("HEARTH_WORKSPACE_TLS_KEY")?,
         },
-        terminal_grace: std::time::Duration::from_secs(
-            std::env::var("HEARTH_TERMINAL_GRACE_SECONDS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(60),
-        ),
+        terminal_grace: std::time::Duration::from_secs(terminal_grace_seconds()),
     })
+}
+
+/// Parse `HEARTH_TERMINAL_GRACE_SECONDS`, warning and falling back to 60 on an
+/// unparseable value, and clamping to `1..=3600` so a typo cannot disable the
+/// reconnect grace or leak shells for an hour or more.
+fn terminal_grace_seconds() -> u64 {
+    match std::env::var("HEARTH_TERMINAL_GRACE_SECONDS") {
+        Err(_) => 60,
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(n) => n.clamp(1, 3600),
+            Err(_) => {
+                tracing::warn!(
+                    value = %raw,
+                    "HEARTH_TERMINAL_GRACE_SECONDS is not a number; using 60"
+                );
+                60
+            }
+        },
+    }
 }
 
 #[cfg(test)]
@@ -74,6 +88,20 @@ mod tests {
         assert_eq!(
             load().unwrap().terminal_grace,
             std::time::Duration::from_secs(5)
+        );
+
+        // An out-of-range value is clamped, not taken literally.
+        std::env::set_var("HEARTH_TERMINAL_GRACE_SECONDS", "99999");
+        assert_eq!(
+            load().unwrap().terminal_grace,
+            std::time::Duration::from_secs(3600)
+        );
+
+        // A non-numeric value warns and falls back to the default.
+        std::env::set_var("HEARTH_TERMINAL_GRACE_SECONDS", "banana");
+        assert_eq!(
+            load().unwrap().terminal_grace,
+            std::time::Duration::from_secs(60)
         );
         std::env::remove_var("HEARTH_TERMINAL_GRACE_SECONDS");
     }

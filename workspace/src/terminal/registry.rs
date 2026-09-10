@@ -18,6 +18,7 @@ use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 use super::ring::Ring;
 
@@ -326,7 +327,15 @@ impl TerminalRegistry {
             }
             s.input.clone()
         };
-        let _ = writer.lock().await.shutdown().await;
+        // The input task can hold this writer lock across a wedged `write_all`
+        // (a shell that stopped reading stdin plus a large pending paste).
+        // Dropping the session below is what actually ends the exec; the
+        // `shutdown()` is best-effort, so bound the wait and proceed either
+        // way rather than blocking the slot lock, and every future attach for
+        // this workspace, forever.
+        if let Ok(mut w) = timeout(Duration::from_secs(2), writer.lock()).await {
+            let _ = w.shutdown().await;
+        }
         *slot = None;
     }
 
@@ -351,7 +360,12 @@ impl TerminalRegistry {
             s.pump.abort();
             s.input.clone()
         };
-        let _ = writer.lock().await.shutdown().await;
+        // See `reap`: the input task can wedge holding this lock, so bound the
+        // wait. Aborting the pump and dropping the session is what ends the
+        // exec; `shutdown()` is best-effort cleanup.
+        if let Ok(mut w) = timeout(Duration::from_secs(2), writer.lock()).await {
+            let _ = w.shutdown().await;
+        }
         *slot = None;
     }
 
@@ -593,6 +607,63 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert!(session.lock().await.pump.is_finished());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn grace_reap_gives_up_on_a_wedged_writer_lock() {
+        let reg = TerminalRegistry::new();
+        let exec = fake::FakeExec::new();
+
+        let a = reg
+            .attach(
+                "w1",
+                80,
+                24,
+                exec,
+                move || async move { Ok(fake::pty_idle()) },
+            )
+            .await
+            .unwrap();
+
+        // Simulate the input task wedged inside `write_all`: hold the writer
+        // lock and never release it.
+        let writer = {
+            reg.live_session("w1")
+                .await
+                .unwrap()
+                .lock()
+                .await
+                .input
+                .clone()
+        };
+        let _wedged = writer.lock().await;
+
+        reg.detach("w1", a.epoch, a.booted.clone(), Duration::from_secs(60))
+            .await;
+        // Let the spawned grace task run once so its sleep timer is registered
+        // before time is advanced.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+
+        // Fire the grace timer; the reap task then parks on the wedged writer
+        // lock while holding the slot lock.
+        tokio::time::advance(Duration::from_secs(61)).await;
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        // The reap has now waited ~2s on the wedged lock and given up, dropping
+        // the entry even though `shutdown()` never ran.
+        tokio::time::advance(Duration::from_secs(3)).await;
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            reg.count().await,
+            0,
+            "a wedged writer must not block the reap"
+        );
+        drop(_wedged);
     }
 
     #[tokio::test]

@@ -16,6 +16,7 @@ use hearth_proto::hearth::v1::{
 };
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
@@ -208,8 +209,13 @@ pub async fn open(
                     msg: Some(ClientMsg::Stdin(b)),
                 }) => {
                     let mut w = input.lock().await;
-                    if w.write_all(&b).await.is_err() {
-                        break;
+                    // Bound the write so a shell that has stopped reading stdin
+                    // plus a large paste cannot wedge this task (and the writer
+                    // lock the reaper needs) forever; on a timeout or error the
+                    // task exits and the session's reap path takes over.
+                    match timeout(Duration::from_secs(5), w.write_all(&b)).await {
+                        Ok(Ok(())) => {}
+                        _ => break,
                     }
                     let _ = w.flush().await;
                 }
