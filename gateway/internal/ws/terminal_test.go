@@ -42,12 +42,14 @@ const (
 
 // echoTerminal implements the WorkspaceIo OpenTerminal contract: it reads the
 // init frame, answers with Ready, echoes every stdin chunk back as stdout, and
-// sends Exit{0} once the client half-closes.
+// sends Exit{0} once the client half-closes. resumed sets the flag on the Ready
+// frame so tests can drive both the fresh and the re-attached path.
 type echoTerminal struct {
 	hv1.UnimplementedWorkspaceIoServer
+	resumed bool
 }
 
-func (echoTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalClientFrame, hv1.TerminalServerFrame]) error {
+func (e echoTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalClientFrame, hv1.TerminalServerFrame]) error {
 	first, err := stream.Recv()
 	if err != nil {
 		return err
@@ -55,7 +57,7 @@ func (echoTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalCli
 	if first.GetInit() == nil {
 		return io.ErrUnexpectedEOF
 	}
-	if err := stream.Send(&hv1.TerminalServerFrame{Msg: &hv1.TerminalServerFrame_Ready{Ready: &hv1.TerminalReady{}}}); err != nil {
+	if err := stream.Send(&hv1.TerminalServerFrame{Msg: &hv1.TerminalServerFrame_Ready{Ready: &hv1.TerminalReady{Resumed: e.resumed}}}); err != nil {
 		return err
 	}
 	for {
@@ -75,7 +77,7 @@ func (echoTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalCli
 }
 
 // startEchoWorkspace stands up an in-process WorkspaceIo server on dev certs.
-func startEchoWorkspace(t *testing.T) string {
+func startEchoWorkspace(t *testing.T, resumed bool) string {
 	t.Helper()
 	srvTLS, err := tlsutil.ServerConfig(caPath, workspaceCertPath, workspaceKeyPath)
 	if err != nil {
@@ -86,7 +88,7 @@ func startEchoWorkspace(t *testing.T) string {
 		t.Fatal(err)
 	}
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(srvTLS)))
-	hv1.RegisterWorkspaceIoServer(gs, echoTerminal{})
+	hv1.RegisterWorkspaceIoServer(gs, echoTerminal{resumed: resumed})
 	go func() { _ = gs.Serve(lis) }()
 	t.Cleanup(gs.Stop)
 	return lis.Addr().String()
@@ -118,7 +120,12 @@ func (d tlsDialer) Dial(addr string) (hv1.WorkspaceIoClient, io.Closer, error) {
 
 func newBridge(t *testing.T) *httptest.Server {
 	t.Helper()
-	addr := startEchoWorkspace(t)
+	return newBridgeResumed(t, false)
+}
+
+func newBridgeResumed(t *testing.T, resumed bool) *httptest.Server {
+	t.Helper()
+	addr := startEchoWorkspace(t, resumed)
 	cliTLS, err := tlsutil.ClientConfig(caPath, gatewayCertPath, gatewayKeyPath, "hearth-workspace")
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +175,18 @@ func TestTerminalBridgeEchoes(t *testing.T) {
 	if err := conn.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("ping")...)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+
+	// The bridge forwards the workspace's Ready frame as a text control
+	// frame before any echoed output.
 	typ, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	if typ != websocket.MessageText || string(data) != `{"t":"ready","resumed":false}` {
+		t.Fatalf("got %v %q, want text %q", typ, data, `{"t":"ready","resumed":false}`)
+	}
+
+	typ, data, err = conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -177,6 +195,55 @@ func TestTerminalBridgeEchoes(t *testing.T) {
 	}
 	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
 		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestTerminalBridgeForwardsReady(t *testing.T) {
+	cases := []struct {
+		name    string
+		resumed bool
+		want    string
+	}{
+		{"fresh", false, `{"t":"ready","resumed":false}`},
+		{"resumed", true, `{"t":"ready","resumed":true}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newBridgeResumed(t, tc.resumed)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, _, err := websocket.Dial(ctx, wsURL(srv.URL, runningID), nil)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer conn.CloseNow()
+
+			typ, data, err := conn.Read(ctx)
+			if err != nil {
+				t.Fatalf("read ready: %v", err)
+			}
+			if typ != websocket.MessageText {
+				t.Fatalf("got frame type %v, want text", typ)
+			}
+			if string(data) != tc.want {
+				t.Fatalf("got %q, want %q", data, tc.want)
+			}
+
+			if err := conn.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("hi")...)); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			typ, data, err = conn.Read(ctx)
+			if err != nil {
+				t.Fatalf("read echo: %v", err)
+			}
+			if typ != websocket.MessageBinary || string(data) != "hi" {
+				t.Fatalf("got %v %q, want binary %q", typ, data, "hi")
+			}
+			if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+		})
 	}
 }
 

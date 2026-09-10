@@ -119,7 +119,13 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 				_ = conn.Close(websocket.StatusNormalClosure, "exit "+strconv.Itoa(int(m.Exit.ExitCode)))
 				return
 			case *hv1.TerminalServerFrame_Ready:
-				// nothing to forward
+				payload := `{"t":"ready","resumed":false}`
+				if m.Ready.Resumed {
+					payload = `{"t":"ready","resumed":true}`
+				}
+				if conn.Write(ctx, websocket.MessageText, []byte(payload)) != nil {
+					return
+				}
 			}
 		}
 	}()
