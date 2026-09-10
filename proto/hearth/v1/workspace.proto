@@ -29,7 +29,10 @@ message TerminalClientFrame {
     TerminalResize resize = 3;
   }
 }
-message TerminalReady { string session_id = 1; }
+message TerminalReady {
+  string session_id = 1;   // per-attach correlation id, for logs
+  bool resumed = 2;         // true = re-attached to a held session, buffer replayed
+}
 message TerminalExit { int32 exit_code = 1; string reason = 2; }
 message TerminalServerFrame {
   oneof msg {

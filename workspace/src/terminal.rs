@@ -103,9 +103,12 @@ pub async fn open(
     // The handshake goes out before any output so a client never sees shell
     // bytes ahead of the ready frame. Nothing is spawned yet, so an early
     // return here leaks no task.
-    tx.send(frame(ServerMsg::Ready(TerminalReady { session_id })))
-        .await
-        .map_err(|_| Status::internal("client hung up"))?;
+    tx.send(frame(ServerMsg::Ready(TerminalReady {
+        session_id,
+        resumed: false,
+    })))
+    .await
+    .map_err(|_| Status::internal("client hung up"))?;
 
     // exec stdout -> server frames; when the stream ends, the exit code.
     let out_tx = tx.clone();
