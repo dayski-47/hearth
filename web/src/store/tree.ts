@@ -26,9 +26,11 @@ export interface TreeSlice {
     children: Record<string, FileNode[]>;
     loading: Set<string>;
     error: string | null;
+    eventsPaused: boolean;
   };
   openWorkspaceTree: (id: string) => Promise<void>;
   closeWorkspaceTree: () => void;
+  setEventsPaused: (v: boolean) => void;
   toggleDir: (path: string) => Promise<void>;
   createNode: (parent: string, name: string, isDir: boolean) => Promise<void>;
   renameNode: (from: string, to: string, isDir: boolean) => Promise<void>;
@@ -90,6 +92,7 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
       children: {},
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
 
     async openWorkspaceTree(id) {
@@ -100,6 +103,7 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
           children: {},
           loading: new Set(),
           error: null,
+          eventsPaused: false,
         },
       });
       await fetchDir("");
@@ -112,8 +116,12 @@ export const createTreeSlice: StateCreator<TreeSlice, [], [], TreeSlice> = (
           children: {},
           loading: new Set(),
           error: null,
+          eventsPaused: false,
         },
       });
+    },
+    setEventsPaused(v) {
+      set((s) => ({ tree: { ...s.tree, eventsPaused: v } }));
     },
 
     async toggleDir(path) {

@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { useStore } from "../store";
 import FileTree from "./FileTree";
+import { retryFileEvents } from "../store/fileEvents";
 import type { FileNode } from "../store/tree";
+
+vi.mock("../store/fileEvents", () => ({ retryFileEvents: vi.fn() }));
 
 const n = (p: string, isDir = false): FileNode => ({
   path: p,
@@ -24,6 +27,7 @@ function seed(
       children: { "": [] },
       loading: new Set(),
       error: null,
+      eventsPaused: false,
       ...partial,
     },
     toggleDir: vi.fn(),
@@ -85,6 +89,14 @@ test("deleting a row confirms then calls deleteNode", async () => {
   render(<FileTree onOpen={() => {}} />);
   await userEvent.click(screen.getByTitle("Delete"));
   expect(deleteNode).toHaveBeenCalledWith("a.txt");
+});
+
+test("a paused events socket renders the bar and Reconnect calls the retry", async () => {
+  seed({ eventsPaused: true });
+  render(<FileTree onOpen={() => {}} />);
+  expect(screen.getByText("Live updates paused.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  expect(retryFileEvents).toHaveBeenCalledTimes(1);
 });
 
 test("the toolbar new file button creates under the root", async () => {

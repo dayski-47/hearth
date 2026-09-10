@@ -69,6 +69,16 @@ test("a garbage frame is ignored", () => {
   expect(onEvent).not.toHaveBeenCalled();
 });
 
+test("retry spawns a fresh socket after the budget was spent", () => {
+  const s = new EventsSocket("x", { onEvent: () => {}, onState: () => {} });
+  s.connect();
+  FakeWS.last!.open();
+  const first = FakeWS.last;
+  s.close();
+  s.retry();
+  expect(FakeWS.last).not.toBe(first);
+});
+
 test("close stops reconnection", () => {
   const s = new EventsSocket("x", { onEvent: () => {}, onState: () => {} });
   s.connect();

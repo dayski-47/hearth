@@ -4,20 +4,36 @@ import {
   applyFileEvent,
   connectFileEvents,
   disconnectFileEvents,
+  retryFileEvents,
 } from "./fileEvents";
 
 type Ev = { path: string; kind: string };
 
 const h = vi.hoisted(() => ({
   onEvent: undefined as undefined | ((e: Ev) => void),
+  onState: undefined as undefined | ((s: string) => void),
+  onGiveUp: undefined as undefined | (() => void),
+  retry: vi.fn(),
 }));
 
 vi.mock("../api/eventsSocket", () => ({
   EventsSocket: class {
-    constructor(_id: string, o: { onEvent: (e: Ev) => void }) {
+    constructor(
+      _id: string,
+      o: {
+        onEvent: (e: Ev) => void;
+        onState?: (s: string) => void;
+        onGiveUp?: () => void;
+      },
+    ) {
       h.onEvent = o.onEvent;
+      h.onState = o.onState;
+      h.onGiveUp = o.onGiveUp;
     }
     connect() {}
+    retry() {
+      h.retry();
+    }
     close() {}
   },
 }));
@@ -30,6 +46,7 @@ function seed() {
       children: { "": [] },
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
   });
 }
@@ -37,6 +54,7 @@ function seed() {
 beforeEach(seed);
 afterEach(() => {
   disconnectFileEvents();
+  h.retry.mockClear();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -181,6 +199,40 @@ test("REMOVED on a dirty open tab marks it deleted, keeping the tab", () => {
   applyFileEvent({ path: "a.txt", kind: "REMOVED" });
   expect(close).not.toHaveBeenCalled();
   expect(del).toHaveBeenCalledWith("a.txt");
+});
+
+test("the first events open loads; a later open resyncs the tree and tabs", () => {
+  const refetch = vi
+    .spyOn(useStore.getState(), "treeRefetchExpanded")
+    .mockResolvedValue();
+  const recheck = vi
+    .spyOn(useStore.getState(), "recheckOpenTabs")
+    .mockResolvedValue();
+  connectFileEvents("ws1");
+
+  useStore.getState().setEventsPaused(true);
+  h.onState!("open");
+  expect(refetch).not.toHaveBeenCalled();
+  expect(recheck).not.toHaveBeenCalled();
+  expect(useStore.getState().tree.eventsPaused).toBe(false);
+
+  useStore.getState().setEventsPaused(true);
+  h.onState!("open");
+  expect(refetch).toHaveBeenCalledTimes(1);
+  expect(recheck).toHaveBeenCalledTimes(1);
+  expect(useStore.getState().tree.eventsPaused).toBe(false);
+});
+
+test("onGiveUp pauses live updates", () => {
+  connectFileEvents("ws1");
+  h.onGiveUp!();
+  expect(useStore.getState().tree.eventsPaused).toBe(true);
+});
+
+test("retryFileEvents asks the socket to retry", () => {
+  connectFileEvents("ws1");
+  retryFileEvents();
+  expect(h.retry).toHaveBeenCalledTimes(1);
 });
 
 test("a burst of events within the debounce window is one coalesced flush", () => {

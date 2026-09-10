@@ -1,7 +1,10 @@
 import { lazy, Suspense } from "react";
 import { useStore } from "../store";
 import { writeFileContent } from "../api/files";
+import { retryFileEvents } from "../store/fileEvents";
 import { basename } from "../lib/fsPath";
+import { useMediaQuery } from "../lib/useMediaQuery";
+import ReconnectBar from "./ReconnectBar";
 import "./EditorPane.css";
 
 // CodeMirror and every language pack stay out of the entry chunk: the editor
@@ -20,6 +23,8 @@ export default function EditorPane() {
   const retryOpen = useStore((s) => s.retryOpen);
   const reloadTab = useStore((s) => s.reloadTab);
   const markChangedOnDisk = useStore((s) => s.markChangedOnDisk);
+  const eventsPaused = useStore((s) => s.tree.eventsPaused);
+  const narrow = useMediaQuery("(max-width: 900px)");
 
   if (tabs.length === 0) {
     return (
@@ -51,6 +56,19 @@ export default function EditorPane() {
 
   return (
     <div className="pane pane-editor editor-pane">
+      {narrow && (
+        <ReconnectBar
+          state={
+            eventsPaused
+              ? {
+                  kind: "paused",
+                  label: "Live updates paused.",
+                  onReconnect: retryFileEvents,
+                }
+              : { kind: "hidden" }
+          }
+        />
+      )}
       <div className="editor-tabs" role="tablist">
         {tabs.map((t) => (
           <div

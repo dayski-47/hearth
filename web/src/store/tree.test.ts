@@ -8,6 +8,7 @@ const empty = {
   children: {},
   loading: new Set<string>(),
   error: null,
+  eventsPaused: false,
 };
 beforeEach(() =>
   useStore.setState({
@@ -115,6 +116,7 @@ test("createNode posts to the files route then inserts the node", async () => {
       children: { "": [] },
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
   });
   const spy = vi.fn(async () => new Response(null, { status: 200 }));
@@ -137,6 +139,7 @@ test("renameNode keeps a directory a directory", async () => {
       children: { "": [node("old", true)] },
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
   });
   globalThis.fetch = vi.fn(
@@ -157,6 +160,7 @@ test("treeRefetchExpanded re-lists every expanded directory", async () => {
       children: {},
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
   });
   const spy = globalThis.fetch as ReturnType<typeof vi.fn>;
@@ -167,6 +171,13 @@ test("treeRefetchExpanded re-lists every expanded directory", async () => {
   expect(paths).toEqual(["", "sub"]);
 });
 
+test("closeWorkspaceTree clears the paused flag", () => {
+  useStore.getState().setEventsPaused(true);
+  expect(useStore.getState().tree.eventsPaused).toBe(true);
+  useStore.getState().closeWorkspaceTree();
+  expect(useStore.getState().tree.eventsPaused).toBe(false);
+});
+
 test("deleteNode calls the API then patches the tree", async () => {
   useStore.setState({
     tree: {
@@ -175,6 +186,7 @@ test("deleteNode calls the API then patches the tree", async () => {
       children: { "": [node("a.txt")] },
       loading: new Set(),
       error: null,
+      eventsPaused: false,
     },
   });
   const spy = vi.fn(async () => new Response(null, { status: 204 }));

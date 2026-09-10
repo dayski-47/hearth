@@ -44,6 +44,10 @@ export class EventsSocket {
     this.bs.open();
   }
 
+  retry() {
+    this.bs.retryNow();
+  }
+
   close() {
     this.bs.close();
   }

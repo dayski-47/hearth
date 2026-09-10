@@ -43,8 +43,8 @@ const pending: FileEvent[] = [];
 
 export function connectFileEvents(workspaceId: string): void {
   disconnectFileEvents();
+  let opened = false;
   sock = new EventsSocket(workspaceId, {
-    onState: () => {},
     onEvent: (e) => {
       pending.push(e);
       clearTimeout(timer);
@@ -53,6 +53,20 @@ export function connectFileEvents(workspaceId: string): void {
         for (const ev of batch) applyFileEvent(ev);
       }, 100);
     },
+    onState: (s) => {
+      if (s === "open") {
+        const store = useStore.getState();
+        store.setEventsPaused(false);
+        // The first open is the initial load; a later one is a reconnect that
+        // may have missed events, so resync the tree and the open tabs.
+        if (opened) {
+          void store.treeRefetchExpanded();
+          void store.recheckOpenTabs();
+        }
+        opened = true;
+      }
+    },
+    onGiveUp: () => useStore.getState().setEventsPaused(true),
   });
   sock.connect();
 }
@@ -63,4 +77,9 @@ export function disconnectFileEvents(): void {
   pending.length = 0;
   sock?.close();
   sock = undefined;
+  useStore.getState().setEventsPaused(false);
+}
+
+export function retryFileEvents(): void {
+  sock?.retry();
 }

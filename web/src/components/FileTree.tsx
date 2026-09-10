@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { retryFileEvents } from "../store/fileEvents";
 import type { FileNode } from "../store/tree";
+import ReconnectBar from "./ReconnectBar";
 import "./FileTree.css";
 
 function parentOf(path: string): string {
@@ -133,6 +135,7 @@ export default function FileTree({
   const root = useStore((s) => s.tree.children[""]);
   const rootLoading = useStore((s) => s.tree.loading.has(""));
   const error = useStore((s) => s.tree.error);
+  const eventsPaused = useStore((s) => s.tree.eventsPaused);
   const createNode = useStore((s) => s.createNode);
   return (
     <div className="pane pane-files file-tree">
@@ -154,6 +157,17 @@ export default function FileTree({
           + folder
         </button>
       </div>
+      <ReconnectBar
+        state={
+          eventsPaused
+            ? {
+                kind: "paused",
+                label: "Live updates paused.",
+                onReconnect: retryFileEvents,
+              }
+            : { kind: "hidden" }
+        }
+      />
       {error && (
         <div className="ft-error" role="alert">
           {error}

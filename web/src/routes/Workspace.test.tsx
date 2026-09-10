@@ -31,6 +31,7 @@ vi.mock("@xterm/addon-fit", () => ({
 vi.mock("../store/fileEvents", () => ({
   connectFileEvents: vi.fn(),
   disconnectFileEvents: vi.fn(),
+  retryFileEvents: vi.fn(),
 }));
 
 // Every mount also fires GET .../files?path=; answer it with an empty listing
