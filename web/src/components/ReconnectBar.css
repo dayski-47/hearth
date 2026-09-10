@@ -1,0 +1,28 @@
+/*
+ * Same visual weight as the old inline `.term-bar`: a thin strip above the
+ * pane, monospace, tinted by severity. `muted` is a neutral status, `err` is
+ * a stalled or spent connection.
+ */
+.reconnect-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  font: var(--mono);
+  color: var(--warn);
+  background: var(--bg-input);
+}
+.reconnect-bar.muted {
+  color: var(--text-dim);
+}
+.reconnect-bar.err {
+  color: var(--err);
+}
+.reconnect-bar button {
+  font: var(--mono);
+  padding: 1px 8px;
+}
+.reconnect-bar-x {
+  padding: 0 6px;
+  line-height: 1;
+}

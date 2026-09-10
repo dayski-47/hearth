@@ -13,15 +13,6 @@
   min-width: 0;
   background: #101216;
 }
-.term-bar {
-  padding: 3px 10px;
-  font: var(--mono);
-  color: var(--warn);
-  background: var(--bg-input);
-}
-.term-bar.err {
-  color: var(--err);
-}
 .term-host {
   flex: 1;
   min-height: 0;

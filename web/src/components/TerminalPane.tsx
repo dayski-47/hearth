@@ -6,6 +6,7 @@ import { TerminalSocket } from "../api/terminalSocket";
 import { useStore } from "../store";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import KeyToolbar from "./KeyToolbar";
+import ReconnectBar, { type BarState } from "./ReconnectBar";
 import "./TerminalPane.css";
 
 export default function TerminalPane({
@@ -20,9 +21,10 @@ export default function TerminalPane({
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const setConn = useStore((s) => s.setConn);
-  const conn = useStore((s) => s.terminal.conn);
   const showKeys = useMediaQuery("(max-width: 900px)");
-  const [hasOpened, setHasOpened] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnected, setReconnected] = useState(false);
+  const [freshNotice, setFreshNotice] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
 
   useEffect(() => {
@@ -38,18 +40,48 @@ export default function TerminalPane({
     termRef.current = term;
     fitRef.current = fit;
 
+    // True once the socket has opened at least once. A later open is a
+    // reconnect: the gateway replays the ring buffer, so the screen has to be
+    // cleared first or the replay stacks on top of the stale frame.
+    let everOpened = false;
+    // Whether the most recent open was a reconnect. Read by onReady, which
+    // arrives just after onState("open") on the same connection.
+    let openedAsReconnect = false;
+    let reconnectingTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectedTimer: ReturnType<typeof setTimeout> | undefined;
+
     const sock = new TerminalSocket(workspaceId, {
       onData: (bytes) => term.write(bytes),
       onState: (s) => {
         setConn(s);
-        if (s === "open") {
-          setHasOpened(true);
-          term.writeln("\r\n\x1b[90m-- connected --\x1b[0m");
+        if (s === "connecting") {
+          setGaveUp(false);
+          if (everOpened) {
+            // A sub-second blip should not flash the bar; only show it once
+            // the gap is long enough to notice.
+            clearTimeout(reconnectingTimer);
+            reconnectingTimer = setTimeout(() => setReconnecting(true), 1000);
+          }
         }
-        if (s === "connecting" && term.buffer.active.length > 1)
-          term.writeln("\r\n\x1b[90m-- reconnecting --\x1b[0m");
+        if (s === "open") {
+          clearTimeout(reconnectingTimer);
+          setReconnecting(false);
+          setGaveUp(false);
+          openedAsReconnect = everOpened;
+          if (everOpened) term.reset();
+          everOpened = true;
+        }
       },
       onGiveUp: () => setGaveUp(true),
+      onReady: (resumed) => {
+        if (resumed) {
+          setReconnected(true);
+          clearTimeout(reconnectedTimer);
+          reconnectedTimer = setTimeout(() => setReconnected(false), 2000);
+        } else if (openedAsReconnect) {
+          setFreshNotice(true);
+        }
+      },
     });
     sockRef.current = sock;
     sock.connect(term.cols, term.rows);
@@ -74,6 +106,8 @@ export default function TerminalPane({
 
     return () => {
       clearTimeout(debounce);
+      clearTimeout(reconnectingTimer);
+      clearTimeout(reconnectedTimer);
       ro.disconnect();
       onData.dispose();
       sock.close();
@@ -100,28 +134,25 @@ export default function TerminalPane({
     return () => clearTimeout(t);
   }, [visible]);
 
-  let bar: string | null = null;
-  let barErr = false;
+  // Precedence: gaveup > fresh > reconnecting > reconnected > hidden.
+  let barState: BarState = { kind: "hidden" };
   if (gaveUp) {
-    bar = "disconnected - reload to retry";
-    barErr = true;
-  } else if (!hasOpened) {
-    // First handshake (gateway -> agent -> podman exec) is not instant. Stay
-    // neutral until the socket has opened at least once; never flash the red
-    // "disconnected" or the "reconnecting" bar before the first connect.
-    bar = conn === "open" ? null : "connecting...";
-  } else if (conn === "connecting") {
-    bar = "reconnecting...";
-  } else if (conn === "closed") {
-    bar = "disconnected";
-    barErr = true;
+    barState = {
+      kind: "gaveup",
+      label: "Disconnected.",
+      onReconnect: () => sockRef.current?.retry(),
+    };
+  } else if (freshNotice) {
+    barState = { kind: "fresh", onDismiss: () => setFreshNotice(false) };
+  } else if (reconnecting) {
+    barState = { kind: "reconnecting" };
+  } else if (reconnected) {
+    barState = { kind: "reconnected" };
   }
 
   return (
     <div className="term-pane">
-      {bar && (
-        <div className={barErr ? "term-bar err" : "term-bar"}>{bar}</div>
-      )}
+      <ReconnectBar state={barState} />
       <div className="term-host" ref={hostRef} />
       {showKeys && <KeyToolbar onKey={(seq) => sockRef.current?.send(seq)} />}
     </div>
