@@ -74,4 +74,16 @@ mod tests {
     fn empty_ring_snapshots_empty() {
         assert!(Ring::new().snapshot().is_empty());
     }
+
+    #[test]
+    fn many_small_writes_evict_from_the_front() {
+        let mut r = Ring::new();
+        r.push(&vec![b'a'; CAP - 2]);
+        r.push(b"bcd");
+        let s = r.snapshot();
+        assert_eq!(s.len(), CAP);
+        assert_eq!(s[0], b'a');
+        assert_eq!(&s[s.len() - 3..], b"bcd");
+        assert_eq!(s.iter().filter(|&&b| b == b'a').count(), CAP - 3);
+    }
 }

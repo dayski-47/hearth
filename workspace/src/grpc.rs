@@ -2,6 +2,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use hearth_proto::hearth::v1::{
@@ -13,7 +14,9 @@ use hearth_proto::hearth::v1::{
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 
-use crate::{config::Config, engine::PodmanExec, files::Files, terminal, tls};
+use crate::{
+    config::Config, engine::PodmanExec, files::Files, terminal, terminal::TerminalRegistry, tls,
+};
 
 /// Largest file `read_file` will stream back. A workspace is for source, not
 /// for shipping build artefacts down the wire.
@@ -22,11 +25,23 @@ const READ_CAP: u64 = 10 * 1024 * 1024;
 pub struct WorkspaceSvc {
     exec: Arc<PodmanExec>,
     files: Arc<Files>,
+    terminals: Arc<TerminalRegistry>,
+    terminal_grace: Duration,
 }
 
 impl WorkspaceSvc {
-    pub fn new(exec: Arc<PodmanExec>, files: Arc<Files>) -> Self {
-        Self { exec, files }
+    pub fn new(
+        exec: Arc<PodmanExec>,
+        files: Arc<Files>,
+        terminals: Arc<TerminalRegistry>,
+        terminal_grace: Duration,
+    ) -> Self {
+        Self {
+            exec,
+            files,
+            terminals,
+            terminal_grace,
+        }
     }
 }
 
@@ -44,7 +59,13 @@ impl WorkspaceIo for WorkspaceSvc {
         &self,
         req: Request<tonic::Streaming<TerminalClientFrame>>,
     ) -> Result<Response<Self::OpenTerminalStream>, Status> {
-        terminal::open(self.exec.clone(), req.into_inner()).await
+        terminal::open(
+            self.terminals.clone(),
+            self.exec.clone(),
+            self.terminal_grace,
+            req.into_inner(),
+        )
+        .await
     }
 
     async fn list_dir(
@@ -121,10 +142,16 @@ where
     let tls_config = tls::server_config(&cfg.tls)?;
     let exec = Arc::new(exec);
     let files = Arc::new(Files::new(exec.docker().clone(), READ_CAP));
+    let terminals = TerminalRegistry::new();
     tracing::info!(%addr, "workspace grpc listening");
     Server::builder()
         .tls_config(tls_config)?
-        .add_service(WorkspaceIoServer::new(WorkspaceSvc::new(exec, files)))
+        .add_service(WorkspaceIoServer::new(WorkspaceSvc::new(
+            exec,
+            files,
+            terminals,
+            cfg.terminal_grace,
+        )))
         .serve_with_shutdown(addr, shutdown)
         .await
         .context("grpc serve")?;
@@ -149,7 +176,12 @@ mod tests {
         .ok()?;
         let exec = Arc::new(exec);
         let files = Arc::new(Files::new(exec.docker().clone(), READ_CAP));
-        Some(WorkspaceSvc::new(exec, files))
+        Some(WorkspaceSvc::new(
+            exec,
+            files,
+            TerminalRegistry::new(),
+            Duration::from_secs(60),
+        ))
     }
 
     #[tokio::test]

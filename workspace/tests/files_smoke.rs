@@ -71,7 +71,12 @@ async fn run(
     volume: &str,
 ) -> Result<(), String> {
     let files = Arc::new(Files::new(docker.clone(), READ_CAP));
-    let svc = WorkspaceSvc::new(Arc::new(exec), files);
+    let svc = WorkspaceSvc::new(
+        Arc::new(exec),
+        files,
+        hearth_workspace::terminal::TerminalRegistry::new(),
+        std::time::Duration::from_secs(60),
+    );
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

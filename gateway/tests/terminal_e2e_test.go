@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,7 @@ func TestTerminalE2E(t *testing.T) {
 		"HEARTH_WORKSPACE_TLS_CERT="+filepath.Join(certsDir, "workspace.pem"),
 		"HEARTH_WORKSPACE_TLS_KEY="+filepath.Join(certsDir, "workspace-key.pem"),
 		"HEARTH_PODMAN_SOCKET="+socket,
+		"HEARTH_TERMINAL_GRACE_SECONDS=3",
 		"RUST_LOG=info",
 	)
 	wsCmd.Stdout = wsLog
@@ -414,6 +416,62 @@ func TestTerminalE2E(t *testing.T) {
 	}
 	t.Logf("terminal echoed back: %q", strings.TrimSpace(string(acc)))
 
+	// --- 11b. Resume: drop the socket, reconnect within grace ---------
+	// Record the shell PID, then close the WebSocket without exiting.
+	if err := c.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("echo PID=$$\n")...)); err != nil {
+		t.Fatalf("write pid command: %v", err)
+	}
+	pid := readMarker(t, c, ctx, "PID")
+	_ = c.Close(websocket.StatusNormalClosure, "client blip")
+
+	time.Sleep(1 * time.Second) // well within the 3s grace
+
+	resumeDialCtx, resumeDialCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer resumeDialCancel()
+	c2, resp2, err := websocket.Dial(resumeDialCtx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"Cookie": {sessionCookie.String()}, "Origin": {originURL}}})
+	if err != nil {
+		t.Fatalf("resume dial: %v (%s)", err, statusOf(resp2))
+	}
+	t.Cleanup(func() { _ = c2.CloseNow() })
+
+	// The replay must carry the earlier marker output.
+	replay := readUntil(t, c2, ctx, "hearthE2E")
+	if !strings.Contains(replay, "PID=") {
+		t.Fatalf("resume replay missing the earlier prompt output: %q", replay)
+	}
+	// Same shell: $$ is unchanged.
+	if err := c2.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("echo AGAIN=$$\n")...)); err != nil {
+		t.Fatalf("write again command: %v", err)
+	}
+	again := readMarker(t, c2, ctx, "AGAIN")
+	if again != pid {
+		t.Fatalf("resume attached a new shell: was pid %s, now %s", pid, again)
+	}
+	t.Logf("resume re-attached to shell pid %s", pid)
+
+	// --- 11c. Past grace: a fresh shell -------------------------------
+	_ = c2.Close(websocket.StatusNormalClosure, "blip 2")
+	time.Sleep(4 * time.Second) // past the 3s grace
+
+	freshDialCtx, freshDialCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer freshDialCancel()
+	c3, _, err := websocket.Dial(freshDialCtx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{
+		"Cookie": {sessionCookie.String()}, "Origin": {originURL}}})
+	if err != nil {
+		t.Fatalf("post-grace dial: %v", err)
+	}
+	t.Cleanup(func() { _ = c3.CloseNow() })
+	if err := c3.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("echo FRESH=$$\n")...)); err != nil {
+		t.Fatalf("write fresh command: %v", err)
+	}
+	fresh := readMarker(t, c3, ctx, "FRESH")
+	if fresh == pid {
+		t.Fatalf("post-grace reconnect reused the reaped shell pid %s", pid)
+	}
+	t.Logf("post-grace attached a fresh shell pid %s (was %s)", fresh, pid)
+	c = c3 // let the existing exit-step drain c3
+
 	// Ask the shell to exit; the server should then close the socket.
 	if err := c.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("exit\n")...)); err != nil {
 		t.Fatalf("write exit command: %v", err)
@@ -449,4 +507,49 @@ func statusOf(resp *http.Response) string {
 		return "no response"
 	}
 	return resp.Status
+}
+
+// readUntil reads binary frames off the socket until the accumulated output
+// contains sub, then returns everything read so far.
+func readUntil(t *testing.T, c *websocket.Conn, parent context.Context, sub string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	var acc []byte
+	for {
+		typ, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("did not see %q before timeout: %v\ngot so far: %q", sub, err, acc)
+		}
+		if typ == websocket.MessageBinary {
+			acc = append(acc, data...)
+		}
+		if strings.Contains(string(acc), sub) {
+			return string(acc)
+		}
+	}
+}
+
+// readMarker reads frames until the shell's output for `echo NAME=$$` shows
+// up, i.e. `NAME=<digits>`, and returns the digits. The command line the PTY
+// echoes back reads `NAME=$$`, which has no digits after the `=`, so it does
+// not match.
+func readMarker(t *testing.T, c *websocket.Conn, parent context.Context, name string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	re := regexp.MustCompile(name + `=(\d+)`)
+	var acc []byte
+	for {
+		typ, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("did not see %s=<pid> before timeout: %v\ngot so far: %q", name, err, acc)
+		}
+		if typ == websocket.MessageBinary {
+			acc = append(acc, data...)
+		}
+		if m := re.FindSubmatch(acc); m != nil {
+			return string(m[1])
+		}
+	}
 }
