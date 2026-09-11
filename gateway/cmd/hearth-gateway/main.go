@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/agentclient"
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
@@ -22,6 +23,7 @@ import (
 	"github.com/dayski-47/hearth/gateway/internal/grpcserver"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/httpapi"
+	"github.com/dayski-47/hearth/gateway/internal/idle"
 	"github.com/dayski-47/hearth/gateway/internal/password"
 	"github.com/dayski-47/hearth/gateway/internal/reconcile"
 	"github.com/dayski-47/hearth/gateway/internal/reqid"
@@ -91,6 +93,7 @@ func runServe() error {
 	}, logger)
 
 	reg := agentregistry.NewInMemory()
+	activityTracker := activity.NewTracker()
 	// Rebuild the liveness cache from the durable record on boot, preserving the
 	// persisted status/heartbeat/capacity so a "lost" host is not silently
 	// revived to "ready" (and Pick-able) by a gateway restart.
@@ -135,11 +138,13 @@ func runServe() error {
 		Dial:          wsDialer{tls: wsTLS},
 		AllowedOrigin: cfg.AllowedOrigin,
 		Logger:        logger,
+		Activity:      activityTracker,
 	}
 	files := &httpapi.FileDeps{
 		Resolver: wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:     wsDialer{tls: wsTLS},
 		Logger:   logger,
+		Activity: activityTracker,
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -182,6 +187,23 @@ func runServe() error {
 				cancel()
 				if err != nil {
 					logger.Warn("reconcile pass failed", "error", err)
+				}
+			}
+		}
+	})
+	g.Go(func() error {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-gctx.Done():
+				return nil
+			case now := <-t.C:
+				if err := idle.Sweep(gctx, idle.Deps{
+					Store: st.Queries(), Tracker: activityTracker, Stop: wsSvc,
+					Timeout: cfg.Workspace.IdleTimeout, Logger: logger,
+				}, now); err != nil {
+					logger.Warn("idle sweep failed", "error", err)
 				}
 			}
 		}

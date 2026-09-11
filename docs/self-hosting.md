@@ -100,7 +100,7 @@ The per-workspace resource limits live in `.env` as `HEARTH_WORKSPACE_*`:
 | `HEARTH_WORKSPACE_MEMORY` | Memory limit in bytes | `2147483648` (2 GiB) |
 | `HEARTH_WORKSPACE_PIDS` | Max process count | `512` |
 | `HEARTH_WORKSPACE_DISK` | Disk quota in bytes | `5368709120` (5 GiB) |
-| `HEARTH_WORKSPACE_IDLE_TIMEOUT` | Idle time before a workspace is paused | `30m` |
+| `HEARTH_WORKSPACE_IDLE_TIMEOUT` | Idle time before a workspace is stopped | `30m` |
 | `HEARTH_TERMINAL_GRACE_SECONDS` | Seconds a disconnected terminal session is kept alive so a reconnect resumes the same shell (clamped to `1..3600`) | `60` |
 
 The resource limits and the idle timeout are read by the gateway alone; it
