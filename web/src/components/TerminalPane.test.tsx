@@ -94,8 +94,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mount() {
-  return render(<TerminalPane workspaceId="a" visible={true} />);
+function mount(props: { onGiveUp?: () => void } = {}) {
+  return render(<TerminalPane workspaceId="a" visible={true} {...props} />);
 }
 
 test("resets the screen on a reconnect open but not the first open", () => {
@@ -181,6 +181,21 @@ test("giving up shows Disconnected with a working Reconnect button", () => {
   expect(screen.getByText("Disconnected.")).toBeInTheDocument();
   act(() => fireEvent.click(button));
   expect(retry).toHaveBeenCalled();
+});
+
+test("calls onGiveUp exactly when the connection gives up", () => {
+  const onGiveUp = vi.fn();
+  mount({ onGiveUp });
+  open();
+  expect(onGiveUp).not.toHaveBeenCalled();
+
+  // BackoffSocket gives up after MAX_ATTEMPTS closes with no open between.
+  for (let i = 0; i < 10; i++) {
+    act(() => latest().onclose?.());
+    advance(6000);
+  }
+
+  expect(onGiveUp).toHaveBeenCalledOnce();
 });
 
 test("the reconnecting bar waits out a sub-second blip", () => {

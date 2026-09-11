@@ -12,9 +12,11 @@ import "./TerminalPane.css";
 export default function TerminalPane({
   workspaceId,
   visible,
+  onGiveUp,
 }: {
   workspaceId: string;
   visible: boolean;
+  onGiveUp?: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sockRef = useRef<TerminalSocket | null>(null);
@@ -31,6 +33,10 @@ export default function TerminalPane({
   // mounts or after term.reset() on a reconnect. Shared by the resize observer
   // and the visible-transition refit.
   const settledAfterRef = useRef(0);
+  // Kept current every render so the effect below (which must not re-run on
+  // every parent render) always calls the latest callback.
+  const onGiveUpRef = useRef(onGiveUp);
+  onGiveUpRef.current = onGiveUp;
 
   useEffect(() => {
     const term = new Terminal({
@@ -95,7 +101,10 @@ export default function TerminalPane({
           }, 500);
         }
       },
-      onGiveUp: () => setGaveUp(true),
+      onGiveUp: () => {
+        setGaveUp(true);
+        onGiveUpRef.current?.();
+      },
       onReady: (resumed) => {
         if (resumed) {
           setReconnected(true);
