@@ -95,6 +95,16 @@ func (f *fakeStore) GetWorkspaceForOwner(_ context.Context, p gen.GetWorkspaceFo
 	return ws, nil
 }
 
+func (f *fakeStore) GetWorkspace(_ context.Context, id pgtype.UUID) (gen.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ws, ok := f.rows[store.UUIDString(id)]
+	if !ok {
+		return gen.Workspace{}, errors.New("no rows")
+	}
+	return ws, nil
+}
+
 func (f *fakeStore) ListWorkspacesForOwner(_ context.Context, ownerID pgtype.UUID) ([]gen.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -448,6 +458,70 @@ func TestStopAgentErrorStateReturnsErrAgentCall(t *testing.T) {
 	got, err := s.Stop(context.Background(), mustUUID(t, ownerAID), ws.ID)
 	if !errors.Is(err, ErrAgentCall) {
 		t.Fatalf("Stop err = %v, want ErrAgentCall", err)
+	}
+	if got.State != "error" {
+		t.Fatalf("returned state = %q, want error", got.State)
+	}
+	stored, _ := st.get(ws.ID)
+	if stored.State != "error" {
+		t.Fatalf("stored state = %q, want error", stored.State)
+	}
+}
+
+func TestStopIdleUpdatesStateAndWritesIdleStoppedEvent(t *testing.T) {
+	st := newFakeStore()
+	dial := &fakeDialer{client: &fakeAgentClient{}}
+	s := newTestService(t, st, readyRegistry(), dial)
+
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := s.StopIdle(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("StopIdle: %v", err)
+	}
+	if got.State != "stopped" {
+		t.Fatalf("returned state = %q, want stopped", got.State)
+	}
+	stored, _ := st.get(ws.ID)
+	if stored.State != "stopped" {
+		t.Fatalf("stored state = %q, want stopped", stored.State)
+	}
+	if !contains(st.eventKinds(), "idle_stopped") {
+		t.Fatalf("events = %v, want idle_stopped", st.eventKinds())
+	}
+	if contains(st.eventKinds(), "stopped") {
+		t.Fatalf("events = %v, want no plain \"stopped\" event", st.eventKinds())
+	}
+}
+
+func TestStopIdleUnknownWorkspaceReturnsErrNotFound(t *testing.T) {
+	st := newFakeStore()
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+
+	_, err := s.StopIdle(context.Background(), mustUUID(t, "99999999-9999-9999-9999-999999999999"))
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStopIdleAgentErrorParksRow(t *testing.T) {
+	st := newFakeStore()
+	dial := &fakeDialer{client: &fakeAgentClient{
+		stopFn: func(_ context.Context, in *hv1.WorkspaceRef) (*hv1.Workspace, error) {
+			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_ERROR, Message: "kaput"}, nil
+		},
+	}}
+	s := newTestService(t, st, readyRegistry(), dial)
+
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := s.StopIdle(context.Background(), ws.ID)
+	if !errors.Is(err, ErrAgentCall) {
+		t.Fatalf("StopIdle err = %v, want ErrAgentCall", err)
 	}
 	if got.State != "error" {
 		t.Fatalf("returned state = %q, want error", got.State)

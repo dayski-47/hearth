@@ -39,6 +39,7 @@ const agentRPCTimeout = 20 * time.Second
 // Store is the subset of *gen.Queries the service calls. *gen.Queries satisfies it.
 type Store interface {
 	CreateWorkspace(context.Context, gen.CreateWorkspaceParams) (gen.Workspace, error)
+	GetWorkspace(context.Context, pgtype.UUID) (gen.Workspace, error)
 	GetWorkspaceForOwner(context.Context, gen.GetWorkspaceForOwnerParams) (gen.Workspace, error)
 	ListWorkspacesForOwner(context.Context, pgtype.UUID) ([]gen.Workspace, error)
 	SetWorkspacePlacement(context.Context, gen.SetWorkspacePlacementParams) error
@@ -190,6 +191,22 @@ func (s *Service) Stop(ctx context.Context, ownerID, id pgtype.UUID) (gen.Worksp
 	})
 }
 
+// StopIdle stops a workspace on the system's behalf, with no owner in
+// context, used by the idle auto-stop sweep (package idle). Same agent call
+// and row convergence as Stop, but the resulting event is "idle_stopped"
+// instead of "stopped" so event history can tell the two apart.
+func (s *Service) StopIdle(ctx context.Context, id pgtype.UUID) (gen.Workspace, error) {
+	ws, err := s.st.GetWorkspace(ctx, id)
+	if err != nil {
+		return gen.Workspace{}, ErrNotFound
+	}
+	return s.driveWorkspace(ctx, ws, "StopWorkspace", "idle_stopped", func(c hv1.AgentClient) (*hv1.Workspace, error) {
+		rpcCtx, cancel := context.WithTimeout(ctx, agentRPCTimeout)
+		defer cancel()
+		return c.StopWorkspace(rpcCtx, &hv1.WorkspaceRef{WorkspaceId: store.UUIDString(id)})
+	})
+}
+
 // Destroy tells the owning agent to tear the workspace down and then deletes the
 // row. A "deleting" event is written before the agent call; any agent failure
 // parks the row in "error" and returns ErrAgentCall without deleting it.
@@ -242,8 +259,9 @@ func (s *Service) parkErr(ctx context.Context, id pgtype.UUID, reason string) er
 	return ErrAgentCall
 }
 
-// drive dials the workspace's agent, runs call, maps the reported state onto the
-// row, writes an event, and returns the refreshed row. Shared by Start/Stop.
+// drive dials the owner-scoped workspace's agent, runs call, maps the
+// reported state onto the row, writes an event, and returns the refreshed
+// row. Shared by Start/Stop.
 func (s *Service) drive(ctx context.Context, ownerID, id pgtype.UUID, kind string,
 	call func(hv1.AgentClient) (*hv1.Workspace, error)) (gen.Workspace, error) {
 
@@ -251,6 +269,16 @@ func (s *Service) drive(ctx context.Context, ownerID, id pgtype.UUID, kind strin
 	if err != nil {
 		return gen.Workspace{}, ErrNotFound
 	}
+	return s.driveWorkspace(ctx, ws, kind, "", call)
+}
+
+// driveWorkspace is drive's shared core over an already-fetched row, so a
+// system-initiated caller (StopIdle) can supply one without an owner check.
+// eventKind overrides the event written on success; empty means "use the
+// resulting state name," drive's original behavior.
+func (s *Service) driveWorkspace(ctx context.Context, ws gen.Workspace, kind, eventKind string,
+	call func(hv1.AgentClient) (*hv1.Workspace, error)) (gen.Workspace, error) {
+	id := ws.ID
 
 	// fail parks the row in "error" and returns the row with a matching State,
 	// so the caller (and the HTTP 502 body) sees "error", not the stale
@@ -291,7 +319,11 @@ func (s *Service) drive(ctx context.Context, ownerID, id pgtype.UUID, kind strin
 		s.storeWriteFailed(ctx, id, "state_write_failed", err)
 		return gen.Workspace{}, err
 	}
-	s.event(ctx, id, want, nil)
+	ek := eventKind
+	if ek == "" {
+		ek = want
+	}
+	s.event(ctx, id, ek, nil)
 	s.logger.InfoContext(ctx, "workspace "+want, "workspace_id", store.UUIDString(id))
 	ws.State = want
 	return ws, nil
