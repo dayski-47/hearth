@@ -29,6 +29,7 @@ func (d Deps) Events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wid := store.UUIDString(wksp.ID)
+	d.Activity.Touch(wid)
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{hostOf(d.AllowedOrigin)},

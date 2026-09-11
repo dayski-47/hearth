@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
@@ -125,6 +126,11 @@ func newBridge(t *testing.T) *httptest.Server {
 
 func newBridgeResumed(t *testing.T, resumed bool) *httptest.Server {
 	t.Helper()
+	return newBridgeResumedWithActivity(t, resumed, activity.NewTracker())
+}
+
+func newBridgeResumedWithActivity(t *testing.T, resumed bool, tr *activity.Tracker) *httptest.Server {
+	t.Helper()
 	addr := startEchoWorkspace(t, resumed)
 	cliTLS, err := tlsutil.ClientConfig(caPath, gatewayCertPath, gatewayKeyPath, "hearth-workspace")
 	if err != nil {
@@ -137,6 +143,7 @@ func newBridgeResumed(t *testing.T, resumed bool) *httptest.Server {
 		Dial:          tlsDialer{cfg: cliTLS},
 		AllowedOrigin: testOrigin,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Activity:      tr,
 	}
 	owner, err := store.ParseUUID(ownerID)
 	if err != nil {
@@ -244,6 +251,43 @@ func TestTerminalBridgeForwardsReady(t *testing.T) {
 				t.Fatalf("close: %v", err)
 			}
 		})
+	}
+}
+
+func TestTerminalTouchesActivityOnConnectAndOnEachFrame(t *testing.T) {
+	tr := activity.NewTracker()
+	srv := newBridgeResumedWithActivity(t, false, tr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL(srv.URL, runningID), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	// Read the Ready frame so the connection is fully established before
+	// checking that connecting alone already touched the tracker.
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	before, ok := tr.IdleFor(runningID, time.Now())
+	if !ok {
+		t.Fatal("expected activity touch on terminal connect")
+	}
+
+	if err := conn.Write(ctx, websocket.MessageBinary, append([]byte{0x00}, []byte("hi")...)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil { // the echo of "hi"
+		t.Fatalf("read echo: %v", err)
+	}
+	after, ok := tr.IdleFor(runningID, time.Now())
+	if !ok {
+		t.Fatal("expected activity still tracked after a frame")
+	}
+	if after > before {
+		t.Fatalf("idle-for grew after a frame (before=%v after=%v), want a fresh touch", before, after)
 	}
 }
 

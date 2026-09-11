@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
@@ -63,6 +64,11 @@ func startWatchWorkspace(t *testing.T) string {
 
 func newEventsBridge(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newEventsBridgeWithActivity(t, activity.NewTracker())
+}
+
+func newEventsBridgeWithActivity(t *testing.T, tr *activity.Tracker) *httptest.Server {
+	t.Helper()
 	addr := startWatchWorkspace(t)
 	cliTLS, err := tlsutil.ClientConfig(caPath, gatewayCertPath, gatewayKeyPath, "hearth-workspace")
 	if err != nil {
@@ -73,6 +79,7 @@ func newEventsBridge(t *testing.T) *httptest.Server {
 		Dial:          tlsDialer{cfg: cliTLS},
 		AllowedOrigin: testOrigin,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Activity:      tr,
 	}
 	owner, err := store.ParseUUID(ownerID)
 	if err != nil {
@@ -123,6 +130,23 @@ func TestEventsBridgeForwards(t *testing.T) {
 	}
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("expected the socket to close once the stream ended")
+	}
+}
+
+func TestEventsTouchesActivityOnConnect(t *testing.T) {
+	tr := activity.NewTracker()
+	srv := newEventsBridgeWithActivity(t, tr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, eventsURL(srv.URL, runningID), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if _, ok := tr.IdleFor(runningID, time.Now()); !ok {
+		t.Fatal("expected activity touch on events connect")
 	}
 }
 

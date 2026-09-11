@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/coder/websocket"
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
@@ -29,6 +30,7 @@ type Deps struct {
 	Dial          WSDialer
 	AllowedOrigin string
 	Logger        *slog.Logger
+	Activity      *activity.Tracker
 }
 
 func hostOf(origin string) string {
@@ -57,6 +59,7 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wid := store.UUIDString(wksp.ID)
+	d.Activity.Touch(wid)
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{hostOf(d.AllowedOrigin)},
@@ -137,6 +140,7 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 			_ = stream.CloseSend()
 			return
 		}
+		d.Activity.Touch(wid)
 		if typ != websocket.MessageBinary || len(data) == 0 {
 			continue
 		}
