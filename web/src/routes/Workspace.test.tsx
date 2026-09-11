@@ -50,6 +50,7 @@ class FakeWS {
   static CONNECTING = 0;
   static CLOSING = 2;
   static CLOSED = 3;
+  static instances: FakeWS[] = [];
   readyState = 0;
   binaryType = "";
   onopen: (() => void) | null = null;
@@ -57,6 +58,9 @@ class FakeWS {
   onerror: (() => void) | null = null;
   onmessage: ((e: { data: ArrayBuffer }) => void) | null = null;
   send() {}
+  constructor() {
+    FakeWS.instances.push(this);
+  }
   close() {
     this.readyState = 3;
     this.onclose?.();
@@ -163,6 +167,50 @@ test("an unreachable workspace explains itself and polls until it recovers", asy
   expect(
     await screen.findByRole("button", { name: "Terminal" }),
   ).toBeInTheDocument();
+});
+
+test("a give-up that resolves to unknown swaps the whole working view", async () => {
+  vi.stubGlobal("WebSocket", FakeWS as unknown as typeof WebSocket);
+  let call = 0;
+  globalThis.fetch = vi.fn(async (url: string) => {
+    if (String(url).includes("/files")) {
+      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+    }
+    call++;
+    const state = call === 1 ? "running" : "unknown";
+    return new Response(
+      JSON.stringify({
+        id: "a",
+        name: "s",
+        image: "x",
+        state,
+        host_id: "local",
+        created_at: "2026-01-01T00:00:00Z",
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  mount();
+  await screen.findByRole("button", { name: "Terminal" });
+
+  const socket = () => FakeWS.instances[FakeWS.instances.length - 1];
+  act(() => {
+    socket().readyState = 1;
+    socket().onopen?.();
+  });
+
+  vi.useFakeTimers();
+  await act(async () => {
+    // BackoffSocket gives up after MAX_ATTEMPTS closes with no open between.
+    for (let i = 0; i < 10; i++) {
+      socket().onclose?.();
+      await vi.advanceTimersByTimeAsync(6000);
+    }
+  });
+  vi.useRealTimers();
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(/unreachable/);
 });
 
 test("404 shows a message and a link home", async () => {

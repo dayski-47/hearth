@@ -123,6 +123,7 @@ export default function Workspace() {
     <TerminalPane
       workspaceId={ws.id}
       visible={narrow ? pane === "terminal" : termVisible}
+      onGiveUp={() => void load()}
     />
   ) : (
     <div className="pane pane-term">
