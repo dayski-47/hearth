@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
 	"github.com/dayski-47/hearth/gateway/internal/wsresolve"
@@ -24,6 +25,7 @@ type FileDeps struct {
 	Resolver wsresolve.Resolver
 	Dial     FileDialer
 	Logger   *slog.Logger
+	Activity *activity.Tracker
 }
 
 // client authorizes the request against its workspace and opens a gRPC client
@@ -43,7 +45,9 @@ func (d *FileDeps) client(w http.ResponseWriter, r *http.Request) (hv1.Workspace
 		http.Error(w, "workspace host unavailable", http.StatusServiceUnavailable)
 		return nil, nil, "", false
 	}
-	return c, closer, store.UUIDString(ws.ID), true
+	wid := store.UUIDString(ws.ID)
+	d.Activity.Touch(wid)
+	return c, closer, wid, true
 }
 
 // grpcToHTTP maps a workspace RPC error onto the closest HTTP status and writes

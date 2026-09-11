@@ -13,7 +13,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/auth"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
 	"github.com/dayski-47/hearth/gateway/internal/store"
@@ -194,16 +196,24 @@ func (d fileDialer) Dial(addr string) (hv1.WorkspaceIoClient, io.Closer, error) 
 
 func newFilesServer(t *testing.T) (*httptest.Server, *memFS) {
 	t.Helper()
+	srv, fs, _ := newFilesServerWithActivity(t)
+	return srv, fs
+}
+
+func newFilesServerWithActivity(t *testing.T) (*httptest.Server, *memFS, *activity.Tracker) {
+	t.Helper()
 	fs := newMemFS()
 	addr := startWorkspaceIo(t, fs)
 	cliTLS, err := tlsutil.ClientConfig(caPath, gatewayCertPath, gatewayKeyPath, "hearth-workspace")
 	if err != nil {
 		t.Fatal(err)
 	}
+	tr := activity.NewTracker()
 	deps := &FileDeps{
 		Resolver: wsresolve.Resolver{Store: fileStore{}, Reg: fileRegistry{addr: addr}},
 		Dial:     fileDialer{cfg: cliTLS},
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Activity: tr,
 	}
 	owner, err := store.ParseUUID(fileOwnerID)
 	if err != nil {
@@ -226,7 +236,7 @@ func newFilesServer(t *testing.T) (*httptest.Server, *memFS) {
 	})
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
-	return srv, fs
+	return srv, fs, tr
 }
 
 func filesURL(base, id, suffix string) string {
@@ -294,6 +304,19 @@ func TestFilesList(t *testing.T) {
 	}
 	if len(out.Entries) != 1 || out.Entries[0].Path != "a.txt" {
 		t.Fatalf("entries: got %+v", out.Entries)
+	}
+}
+
+func TestFilesTouchesActivityOnRequest(t *testing.T) {
+	srv, _, tr := newFilesServerWithActivity(t)
+	resp, err := http.Get(srv.URL + "/api/workspaces/" + fileRunningID + "/files?path=")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	resp.Body.Close()
+
+	if _, ok := tr.IdleFor(fileRunningID, time.Now()); !ok {
+		t.Fatal("expected activity touch on a file API request")
 	}
 }
 
