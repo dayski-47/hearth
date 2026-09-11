@@ -129,7 +129,7 @@ export default function EditorPane() {
               <CodeMirrorHost
                 key={`${t.path}#${t.reloadNonce}`}
                 path={t.path}
-                initialDoc={t.initialDoc ?? ""}
+                initialDoc={t.initialDoc ?? t.baseline}
                 language={t.language}
                 onReady={() => consumeInitialDoc(t.path)}
                 onDirtyChange={(d) => markDirty(t.path, d)}

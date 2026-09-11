@@ -71,6 +71,7 @@ const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function mount(id = "a") {

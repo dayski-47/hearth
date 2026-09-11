@@ -84,6 +84,17 @@ test("an open tab shows the basename and mounts CodeMirror", async () => {
   expect(useStore.getState().editor.tabs[0].initialDoc).toBeNull();
 });
 
+test("a remounted tab with a consumed initialDoc falls back to baseline", async () => {
+  // Simulates EditorPane unmounting and remounting (e.g. the agent-down
+  // full-page swap) after initialDoc has already been consumed once: the
+  // editor must show the last-known content, not an empty document.
+  seed([tab({ initialDoc: null, baseline: "const a = 1;\n" })]);
+  await mountWithEditor();
+  expect(document.querySelector(".cm-content")?.textContent).toContain(
+    "const a = 1;",
+  );
+});
+
 test("a dirty tab shows the unsaved dot", async () => {
   seed([tab({ dirty: true })]);
   await mountWithEditor();
