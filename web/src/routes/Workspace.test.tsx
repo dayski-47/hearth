@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import Workspace from "./Workspace";
@@ -124,6 +124,44 @@ test("a still-creating workspace shows an alert and a link home", async () => {
   );
   expect(
     screen.getByRole("link", { name: "Back to workspaces" }),
+  ).toBeInTheDocument();
+});
+
+test("an unreachable workspace explains itself and polls until it recovers", async () => {
+  let call = 0;
+  globalThis.fetch = vi.fn(async (url: string) => {
+    if (String(url).includes("/files")) {
+      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+    }
+    call++;
+    const state = call === 1 ? "unknown" : "running";
+    return new Response(
+      JSON.stringify({
+        id: "a",
+        name: "s",
+        image: "x",
+        state,
+        host_id: "local",
+        created_at: "2026-01-01T00:00:00Z",
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  vi.useFakeTimers();
+  mount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent(/unreachable/);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  vi.useRealTimers();
+
+  expect(
+    await screen.findByRole("button", { name: "Terminal" }),
   ).toBeInTheDocument();
 });
 

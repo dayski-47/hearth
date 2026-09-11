@@ -61,6 +61,15 @@ export default function Workspace() {
     closeWorkspaceEditor,
   ]);
 
+  // While the workspace's host is unreachable, keep checking until reconcile
+  // resolves it (see the unknown branch below) instead of making the user
+  // refresh the page themselves.
+  useEffect(() => {
+    if (ws?.state !== "unknown") return;
+    const t = setInterval(() => void load(), 3000);
+    return () => clearInterval(t);
+  }, [ws?.state, load]);
+
   if (err) {
     return (
       <main className="ws-view ws-msg">
@@ -78,6 +87,18 @@ export default function Workspace() {
           {ws.state === "error"
             ? "This workspace is in an error state."
             : "This workspace is still being created."}
+        </p>
+        <Link to="/">Back to workspaces</Link>
+      </main>
+    );
+  }
+
+  if (ws.state === "unknown") {
+    return (
+      <main className="ws-view ws-msg">
+        <p role="alert">
+          This workspace's host is unreachable right now. It will
+          reconnect automatically once it comes back.
         </p>
         <Link to="/">Back to workspaces</Link>
       </main>
