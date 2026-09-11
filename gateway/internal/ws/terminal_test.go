@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,13 @@ func (e echoTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalC
 // startEchoWorkspace stands up an in-process WorkspaceIo server on dev certs.
 func startEchoWorkspace(t *testing.T, resumed bool) string {
 	t.Helper()
+	return startWorkspaceServer(t, echoTerminal{resumed: resumed})
+}
+
+// startWorkspaceServer stands up an in-process WorkspaceIo server backed by
+// an arbitrary implementation, on dev certs.
+func startWorkspaceServer(t *testing.T, srv hv1.WorkspaceIoServer) string {
+	t.Helper()
 	srvTLS, err := tlsutil.ServerConfig(caPath, workspaceCertPath, workspaceKeyPath)
 	if err != nil {
 		t.Skip("run `just certs`: ", err)
@@ -89,10 +97,36 @@ func startEchoWorkspace(t *testing.T, resumed bool) string {
 		t.Fatal(err)
 	}
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(srvTLS)))
-	hv1.RegisterWorkspaceIoServer(gs, echoTerminal{resumed: resumed})
+	hv1.RegisterWorkspaceIoServer(gs, srv)
 	go func() { _ = gs.Serve(lis) }()
 	t.Cleanup(gs.Stop)
 	return lis.Addr().String()
+}
+
+// pushTerminal answers Init with Ready and then immediately pushes one
+// unprompted Stdout frame, as a long-running build's output would arrive
+// with no corresponding keystroke from the client. It then blocks until the
+// stream is torn down, so the test controls the connection's lifetime.
+type pushTerminal struct {
+	hv1.UnimplementedWorkspaceIoServer
+}
+
+func (p pushTerminal) OpenTerminal(stream grpc.BidiStreamingServer[hv1.TerminalClientFrame, hv1.TerminalServerFrame]) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if first.GetInit() == nil {
+		return io.ErrUnexpectedEOF
+	}
+	if err := stream.Send(&hv1.TerminalServerFrame{Msg: &hv1.TerminalServerFrame_Ready{Ready: &hv1.TerminalReady{}}}); err != nil {
+		return err
+	}
+	if err := stream.Send(&hv1.TerminalServerFrame{Msg: &hv1.TerminalServerFrame_Stdout{Stdout: []byte("building...")}}); err != nil {
+		return err
+	}
+	<-stream.Context().Done()
+	return stream.Context().Err()
 }
 
 type fakeStore struct{ agentID string }
@@ -132,6 +166,15 @@ func newBridgeResumed(t *testing.T, resumed bool) *httptest.Server {
 func newBridgeResumedWithActivity(t *testing.T, resumed bool, tr *activity.Tracker) *httptest.Server {
 	t.Helper()
 	addr := startEchoWorkspace(t, resumed)
+	return newBridgeToAddr(t, addr, tr)
+}
+
+// newBridgeToAddr wires up the gateway-side bridge (ws.Deps and its router)
+// against an already-running WorkspaceIo server at addr. Shared by
+// newBridgeResumedWithActivity (an echo backend) and tests that need a
+// backend with different behavior (e.g. pushTerminal).
+func newBridgeToAddr(t *testing.T, addr string, tr *activity.Tracker) *httptest.Server {
+	t.Helper()
 	cliTLS, err := tlsutil.ClientConfig(caPath, gatewayCertPath, gatewayKeyPath, "hearth-workspace")
 	if err != nil {
 		t.Fatal(err)
@@ -288,6 +331,49 @@ func TestTerminalTouchesActivityOnConnectAndOnEachFrame(t *testing.T) {
 	}
 	if after > before {
 		t.Fatalf("idle-for grew after a frame (before=%v after=%v), want a fresh touch", before, after)
+	}
+}
+
+func TestTerminalTouchesActivityOnOutboundStdout(t *testing.T) {
+	// A monotonically increasing fake clock lets us tell touches apart by
+	// exactly when they happened, rather than by wall-clock jitter.
+	var n int64
+	tr := activity.NewTrackerWithClock(func() time.Time {
+		return time.Unix(atomic.AddInt64(&n, 1), 0)
+	})
+
+	addr := startWorkspaceServer(t, pushTerminal{})
+	srv := newBridgeToAddr(t, addr, tr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL(srv.URL, runningID), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+
+	// pushTerminal sends this stdout frame on its own, with no client input
+	// ever having been written on this connection.
+	typ, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if typ != websocket.MessageBinary || string(data) != "building..." {
+		t.Fatalf("got %v %q, want binary %q", typ, data, "building...")
+	}
+
+	last := time.Unix(atomic.LoadInt64(&n), 0)
+	idle, ok := tr.IdleFor(runningID, last)
+	if !ok {
+		t.Fatal("expected an activity touch from the outbound stdout frame")
+	}
+	if idle != 0 {
+		t.Fatalf("idle = %v after an unprompted server stdout frame, want 0 (a fresh touch on outbound data, not just on connect)", idle)
 	}
 }
 

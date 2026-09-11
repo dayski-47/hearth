@@ -158,7 +158,7 @@ func TestFilesE2E(t *testing.T) {
 	authH := auth.NewHandlers(mgr, st.Queries(), mgr, auth.Config{
 		AdminUser: cfg.AdminUser, AdminHash: cfg.AdminPasswordHash, SecureCookie: false,
 	}, logger)
-	wsSvc := workspaces.NewService(st.Queries(), reg, agentDialer{tls: agentTLS}, cfg.Workspace, logger)
+	wsSvc := workspaces.NewService(st.Queries(), reg, agentDialer{tls: agentTLS}, cfg.Workspace, nil, logger)
 	files := &httpapi.FileDeps{
 		Resolver: wsresolve.Resolver{Store: st.Queries(), Reg: reg},
 		Dial:     wsDialer{tls: wsClientTLS},

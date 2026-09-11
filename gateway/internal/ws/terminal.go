@@ -115,6 +115,7 @@ func (d Deps) Terminal(w http.ResponseWriter, r *http.Request) {
 			}
 			switch m := f.Msg.(type) {
 			case *hv1.TerminalServerFrame_Stdout:
+				d.Activity.Touch(wid)
 				if conn.Write(ctx, websocket.MessageBinary, m.Stdout) != nil {
 					return
 				}

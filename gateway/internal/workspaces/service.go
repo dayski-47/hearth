@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
@@ -63,16 +64,19 @@ type Dialer interface {
 
 // Service drives the workspace create/start/stop/destroy state machine.
 type Service struct {
-	st     Store
-	reg    Registry
-	dial   Dialer
-	def    config.WorkspaceDefaults
-	logger *slog.Logger
+	st       Store
+	reg      Registry
+	dial     Dialer
+	def      config.WorkspaceDefaults
+	activity *activity.Tracker
+	logger   *slog.Logger
 }
 
-// NewService builds a Service over the given store, registry, dialer and defaults.
-func NewService(st Store, reg Registry, dial Dialer, def config.WorkspaceDefaults, logger *slog.Logger) *Service {
-	return &Service{st: st, reg: reg, dial: dial, def: def, logger: logger}
+// NewService builds a Service over the given store, registry, dialer and
+// defaults. act may be nil (e.g. in tests that don't need idle tracking);
+// activity.Tracker.Touch is nil-receiver-safe.
+func NewService(st Store, reg Registry, dial Dialer, def config.WorkspaceDefaults, act *activity.Tracker, logger *slog.Logger) *Service {
+	return &Service{st: st, reg: reg, dial: dial, def: def, activity: act, logger: logger}
 }
 
 func (s *Service) event(ctx context.Context, id pgtype.UUID, kind string, detail any) {
@@ -318,6 +322,9 @@ func (s *Service) driveWorkspace(ctx context.Context, ws gen.Workspace, kind, ev
 		// Same reasoning as Create: record it, leave the row for the reconciler.
 		s.storeWriteFailed(ctx, id, "state_write_failed", err)
 		return gen.Workspace{}, err
+	}
+	if want == "running" {
+		s.activity.Touch(store.UUIDString(id))
 	}
 	ek := eventKind
 	if ek == "" {

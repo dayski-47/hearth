@@ -65,6 +65,7 @@ func (d Deps) Events(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close(websocket.StatusNormalClosure, "stream ended")
 			return
 		}
+		d.Activity.Touch(wid)
 		// An empty path with KIND_UNSPECIFIED is the watcher's resync signal: the
 		// event channel backed up and some changes were dropped, so a client
 		// should re-fetch the tree. It is forwarded as-is; the empty path is how

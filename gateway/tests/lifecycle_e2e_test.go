@@ -225,7 +225,7 @@ func TestLifecycleE2E(t *testing.T) {
 		AdminUser: cfg.AdminUser, AdminHash: cfg.AdminPasswordHash, SecureCookie: false,
 	}, logger)
 	dialer := agentDialer{tls: agentTLS}
-	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
+	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, nil, logger)
 	httpSrv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, wsSvc, nil, nil).Handler())
 	t.Cleanup(httpSrv.Close)
 

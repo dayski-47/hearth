@@ -141,7 +141,7 @@ func newWorkspaceTestServer(t *testing.T) (*httptest.Server, *http.Cookie, *scri
 		AdminUser: cfg.AdminUser, AdminHash: cfg.AdminPasswordHash, SecureCookie: false,
 	}, logger)
 	agent := &scriptedAgent{}
-	svc := workspaces.NewService(st.Queries(), stubRegistry{}, stubDialer{agent: agent}, cfg.Workspace, logger)
+	svc := workspaces.NewService(st.Queries(), stubRegistry{}, stubDialer{agent: agent}, cfg.Workspace, nil, logger)
 
 	srv := httptest.NewServer(httpapi.New(cfg, st, logger, authH, svc, nil, nil).Handler())
 	t.Cleanup(srv.Close)

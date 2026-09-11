@@ -85,6 +85,22 @@ func TestLoadRejectsNonNumericInt(t *testing.T) {
 	}
 }
 
+// A zero or negative idle timeout would stop every running workspace within
+// about one sweep interval of gateway boot, so it must be rejected at
+// startup rather than taking down a fleet.
+func TestLoadRejectsNonPositiveIdleTimeout(t *testing.T) {
+	for _, bad := range []string{"0s", "0", "-5m"} {
+		t.Run(bad, func(t *testing.T) {
+			env := validEnv()
+			env["HEARTH_WORKSPACE_IDLE_TIMEOUT"] = bad
+			setEnv(t, env)
+			if _, err := Load(); err == nil {
+				t.Fatalf("expected error for HEARTH_WORKSPACE_IDLE_TIMEOUT=%q", bad)
+			}
+		})
+	}
+}
+
 func TestLoadShortSecret(t *testing.T) {
 	env := validEnv()
 	env["HEARTH_SESSION_SECRET"] = "tooshort"

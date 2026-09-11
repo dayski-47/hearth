@@ -95,6 +95,8 @@ func Load() (*Config, error) {
 	d, err := time.ParseDuration(reqDefault("HEARTH_WORKSPACE_IDLE_TIMEOUT", "30m"))
 	if err != nil {
 		m.add("HEARTH_WORKSPACE_IDLE_TIMEOUT: " + err.Error())
+	} else if d <= 0 {
+		m.add("HEARTH_WORKSPACE_IDLE_TIMEOUT must be positive")
 	}
 	c.Workspace.IdleTimeout = d
 

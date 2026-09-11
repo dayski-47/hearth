@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/dayski-47/hearth/gateway/internal/activity"
 	"github.com/dayski-47/hearth/gateway/internal/agentregistry"
 	"github.com/dayski-47/hearth/gateway/internal/config"
 	hv1 "github.com/dayski-47/hearth/gateway/internal/hearth/v1"
@@ -244,7 +246,7 @@ func (d *fakeDialer) Dial(addr string) (hv1.AgentClient, io.Closer, error) {
 
 // --- helpers -------------------------------------------------------------
 
-func newTestService(t *testing.T, st Store, reg Registry, dial Dialer) *Service {
+func newTestService(t *testing.T, st Store, reg Registry, dial Dialer, act *activity.Tracker) *Service {
 	t.Helper()
 	return NewService(st, reg, dial, config.WorkspaceDefaults{
 		Image:       "default:latest",
@@ -254,7 +256,7 @@ func newTestService(t *testing.T, st Store, reg Registry, dial Dialer) *Service 
 		Pids:        512,
 		DiskBytes:   5 << 30,
 		UserNS:      "keep-id",
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, act, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func readyRegistry() fakeRegistry {
@@ -268,7 +270,7 @@ func readyRegistry() fakeRegistry {
 func TestCreatePlacesAndRunsWorkspace(t *testing.T) {
 	st := newFakeStore()
 	dial := &fakeDialer{client: &fakeAgentClient{}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -302,7 +304,7 @@ func TestCreatePlacesAndRunsWorkspace(t *testing.T) {
 func TestCreateWithNoAgentReturnsErrNoAgent(t *testing.T) {
 	st := newFakeStore()
 	reg := fakeRegistry{pickErr: agentregistry.ErrNoAgent}
-	s := newTestService(t, st, reg, &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, reg, &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if !errors.Is(err, ErrNoAgent) {
@@ -320,7 +322,7 @@ func TestCreateAgentFailureLeavesErrorRow(t *testing.T) {
 			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_ERROR, Message: "boom"}, nil
 		},
 	}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if !errors.Is(err, ErrAgentCall) {
@@ -344,7 +346,7 @@ func TestCreatePlacementWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 	// "creating" for the reconciler, and the failure is recorded.
 	st := newFakeStore()
 	st.placementErr = errors.New("db down")
-	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err == nil {
@@ -365,7 +367,7 @@ func TestCreatePlacementWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 
 func TestStopStateWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 	st := newFakeStore()
-	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -390,7 +392,7 @@ func TestStopStateWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 
 func TestCreateRejectsEmptyName(t *testing.T) {
 	st := newFakeStore()
-	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "   ", "")
 	if !errors.Is(err, ErrNoName) {
@@ -403,7 +405,7 @@ func TestCreateRejectsEmptyName(t *testing.T) {
 
 func TestGetIsOwnerScoped(t *testing.T) {
 	st := newFakeStore()
-	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -420,7 +422,7 @@ func TestGetIsOwnerScoped(t *testing.T) {
 func TestStopUpdatesStateFromAgent(t *testing.T) {
 	st := newFakeStore()
 	dial := &fakeDialer{client: &fakeAgentClient{}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -449,7 +451,7 @@ func TestStopAgentErrorStateReturnsErrAgentCall(t *testing.T) {
 			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_ERROR, Message: "kaput"}, nil
 		},
 	}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -471,7 +473,7 @@ func TestStopAgentErrorStateReturnsErrAgentCall(t *testing.T) {
 func TestStopIdleUpdatesStateAndWritesIdleStoppedEvent(t *testing.T) {
 	st := newFakeStore()
 	dial := &fakeDialer{client: &fakeAgentClient{}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -498,7 +500,7 @@ func TestStopIdleUpdatesStateAndWritesIdleStoppedEvent(t *testing.T) {
 
 func TestStopIdleUnknownWorkspaceReturnsErrNotFound(t *testing.T) {
 	st := newFakeStore()
-	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}})
+	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
 	_, err := s.StopIdle(context.Background(), mustUUID(t, "99999999-9999-9999-9999-999999999999"))
 	if !errors.Is(err, ErrNotFound) {
@@ -513,7 +515,7 @@ func TestStopIdleAgentErrorParksRow(t *testing.T) {
 			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_ERROR, Message: "kaput"}, nil
 		},
 	}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -532,10 +534,47 @@ func TestStopIdleAgentErrorParksRow(t *testing.T) {
 	}
 }
 
+func TestStartAfterStopRefreshesActivity(t *testing.T) {
+	st := newFakeStore()
+	dial := &fakeDialer{client: &fakeAgentClient{}}
+
+	clockTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	tracker := activity.NewTrackerWithClock(func() time.Time { return clockTime })
+	s := newTestService(t, st, readyRegistry(), dial, tracker)
+
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	wid := store.UUIDString(ws.ID)
+
+	if _, err := s.Stop(context.Background(), mustUUID(t, ownerAID), ws.ID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Simulate the workspace sitting stopped far longer than any idle timeout
+	// before the user restarts it. This is the bug: a restart must not leave
+	// the tracker holding this now-stale pre-stop touch, or the very next
+	// sweep tick would read it as idle and stop the workspace right back.
+	clockTime = clockTime.Add(2 * time.Hour)
+
+	if _, err := s.Start(context.Background(), mustUUID(t, ownerAID), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	idle, ok := tracker.IdleFor(wid, clockTime)
+	if !ok {
+		t.Fatalf("tracker has no record for %s after Start", wid)
+	}
+	if idle != 0 {
+		t.Fatalf("idle = %v right after Start, want 0 (a fresh touch, not the stale pre-stop one)", idle)
+	}
+}
+
 func TestDestroyRemovesRowOnAgentSuccess(t *testing.T) {
 	st := newFakeStore()
 	dial := &fakeDialer{client: &fakeAgentClient{}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {
@@ -559,7 +598,7 @@ func TestDestroyAgentFailureLeavesErrorRow(t *testing.T) {
 			return nil, errors.New("rpc down")
 		},
 	}}
-	s := newTestService(t, st, readyRegistry(), dial)
+	s := newTestService(t, st, readyRegistry(), dial, nil)
 
 	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
 	if err != nil {

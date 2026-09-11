@@ -127,7 +127,7 @@ func runServe() error {
 		return err
 	}
 	dialer := agentDialer{tls: agentTLS}
-	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, logger)
+	wsSvc := workspaces.NewService(st.Queries(), reg, dialer, cfg.Workspace, activityTracker, logger)
 
 	wsTLS, err := tlsutil.ClientConfig(cfg.TLS.CA, cfg.TLS.Cert, cfg.TLS.Key, "hearth-workspace")
 	if err != nil {

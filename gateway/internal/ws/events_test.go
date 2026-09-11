@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,6 +148,43 @@ func TestEventsTouchesActivityOnConnect(t *testing.T) {
 
 	if _, ok := tr.IdleFor(runningID, time.Now()); !ok {
 		t.Fatal("expected activity touch on events connect")
+	}
+}
+
+func TestEventsTouchesActivityOnEachForwardedEvent(t *testing.T) {
+	// A monotonically increasing fake clock lets us tell touches apart by
+	// exactly when they happened, rather than by wall-clock jitter: the
+	// connect-time touch is call 1, the first event's touch is call 2, and
+	// the second event's touch is call 3.
+	var n int64
+	tr := activity.NewTrackerWithClock(func() time.Time {
+		return time.Unix(atomic.AddInt64(&n, 1), 0)
+	})
+	srv := newEventsBridgeWithActivity(t, tr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, eventsURL(srv.URL, runningID), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	// watchIo forwards two events with no client action in between; each one
+	// must refresh the tracker, not just the initial connect.
+	for i := 0; i < 2; i++ {
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatalf("read event %d: %v", i, err)
+		}
+	}
+
+	last := time.Unix(atomic.LoadInt64(&n), 0)
+	idle, ok := tr.IdleFor(runningID, last)
+	if !ok {
+		t.Fatal("expected activity touch from forwarded events")
+	}
+	if idle != 0 {
+		t.Fatalf("idle = %v after the second forwarded event, want 0 (touched per-event, not just at connect)", idle)
 	}
 }
 
