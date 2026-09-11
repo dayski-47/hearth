@@ -57,6 +57,7 @@ impl PodmanExec {
                     attach_stderr: Some(true),
                     tty: Some(true),
                     cmd: Some(vec![shell.to_string()]),
+                    working_dir: Some("/workspace".to_string()),
                     ..Default::default()
                 },
             )

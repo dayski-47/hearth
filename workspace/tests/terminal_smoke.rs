@@ -50,7 +50,11 @@ async fn shell_round_trip_over_exec() {
                 }),
                 Config {
                     image: Some(IMAGE.to_string()),
-                    cmd: Some(vec!["sleep".to_string(), "300".to_string()]),
+                    cmd: Some(vec![
+                        "sh".to_string(),
+                        "-c".to_string(),
+                        "mkdir -p /workspace && sleep 300".to_string(),
+                    ]),
                     ..Default::default()
                 },
             )
@@ -162,7 +166,11 @@ async fn idle_terminal_tears_down_on_drop() {
                 }),
                 Config {
                     image: Some(IMAGE.to_string()),
-                    cmd: Some(vec!["sleep".to_string(), "300".to_string()]),
+                    cmd: Some(vec![
+                        "sh".to_string(),
+                        "-c".to_string(),
+                        "mkdir -p /workspace && sleep 300".to_string(),
+                    ]),
                     ..Default::default()
                 },
             )
