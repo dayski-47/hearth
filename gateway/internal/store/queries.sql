@@ -55,6 +55,9 @@ RETURNING *;
 -- name: GetWorkspaceForOwner :one
 SELECT * FROM workspaces WHERE id = $1 AND owner_id = $2;
 
+-- name: GetWorkspace :one
+SELECT * FROM workspaces WHERE id = $1;
+
 -- name: ListWorkspacesForOwner :many
 SELECT * FROM workspaces WHERE owner_id = $1 ORDER BY created_at DESC;
 
@@ -75,6 +78,9 @@ DELETE FROM workspaces WHERE id = $1;
 
 -- name: ListReconcilableWorkspaces :many
 SELECT * FROM workspaces WHERE state IN ('creating', 'running', 'stopped', 'unknown');
+
+-- name: ListRunningWorkspaces :many
+SELECT * FROM workspaces WHERE state = 'running';
 
 -- name: MarkAgentWorkspacesUnknown :many
 UPDATE workspaces SET state = 'unknown', updated_at = now()
