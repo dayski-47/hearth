@@ -115,6 +115,15 @@ systemctl --user restart hearth-workspace
 
 New limits apply to workspaces created after the restart.
 
+The Postgres password is a separate setting. The compose default is `hearth`,
+and Postgres is never published outside the compose network. Set
+`POSTGRES_PASSWORD` in `deploy/.env` (Compose reads that file when it parses the
+stack) before the first `docker compose up`. Changing it on a running stack does
+not work: `pgdata` keeps the password from its first launch and Postgres ignores
+the variable afterward, so the gateway's connection string would change while
+the database password would not. To change it later you have to delete the
+`pgdata` volume as well, which wipes the database.
+
 ## Persistent host-mounted workspaces
 
 By default every workspace gets a fresh, disposable volume that is removed
@@ -127,19 +136,26 @@ is allowed to bind-mount, for example:
 HEARTH_HOST_MOUNTS=/home/you/projects,/srv/data
 ```
 
-When creating a workspace, pass one of those exact paths. A path that is
-not in the list is rejected; there is no partial or prefix matching.
-Destroying a workspace created this way never deletes the real directory -
-only the container goes away.
+`HEARTH_HOST_MOUNTS` is read once at agent startup, so restart it after
+editing the list:
 
-The Postgres password is a separate setting. The compose default is `hearth`,
-and Postgres is never published outside the compose network. Set
-`POSTGRES_PASSWORD` in `deploy/.env` (Compose reads that file when it parses the
-stack) before the first `docker compose up`. Changing it on a running stack does
-not work: `pgdata` keeps the password from its first launch and Postgres ignores
-the variable afterward, so the gateway's connection string would change while
-the database password would not. To change it later you have to delete the
-`pgdata` volume as well, which wipes the database.
+```
+systemctl --user restart hearth-agent
+```
+
+To use one of those paths, set it as the "host path (optional)" field in
+the dashboard's New Workspace form, or pass `host_mount_path` in a
+`POST /api/workspaces` request body. A path that is not in the list is
+rejected; there is no partial or prefix matching. Destroying a workspace
+created this way never deletes the real directory - only the container
+goes away.
+
+A bind-mounted workspace runs as your host user (via `keep-id`) with full
+read and write access to whatever directory you allow, so list the
+narrowest directory that does the job, and never one containing
+credentials, `.ssh`, or Hearth's own `.env` file. Removing a path from
+`HEARTH_HOST_MOUNTS` only stops new workspaces from using it; a workspace
+that already has it bind-mounted keeps access until it is destroyed.
 
 ## Using your own base image
 
