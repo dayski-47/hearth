@@ -7,7 +7,8 @@
 //! are used.
 
 use hearth_agent::engine::{
-    ContainerEngine, ContainerRunState, NetworkMode, PodmanEngine, WorkspaceContainerSpec,
+    ContainerEngine, ContainerRunState, MountSource, NetworkMode, PodmanEngine,
+    WorkspaceContainerSpec,
 };
 
 #[tokio::test]
@@ -31,7 +32,7 @@ async fn create_start_inspect_remove_busybox() {
     let spec = WorkspaceContainerSpec {
         name: name.clone(),
         image: "docker.io/library/busybox:latest".into(),
-        volume: volume.clone(),
+        mount: MountSource::Volume(volume.clone()),
         network: NetworkMode::None,
         userns: "auto".into(),
         cpu_millis: 1000,

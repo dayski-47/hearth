@@ -27,7 +27,11 @@ export default function NewWorkspaceForm() {
     setErr("");
     setBusy(true);
     try {
-      await create(name, String(f.get("image") ?? "").trim() || undefined);
+      await create(
+        name,
+        String(f.get("image") ?? "").trim() || undefined,
+        String(f.get("hostMountPath") ?? "").trim() || undefined,
+      );
       setOpen(false);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "create failed");
@@ -40,6 +44,7 @@ export default function NewWorkspaceForm() {
     <form className="nw-form" onSubmit={onSubmit}>
       <input name="name" placeholder="name" autoFocus />
       <input name="image" placeholder="image (optional)" />
+      <input name="hostMountPath" placeholder="host path (optional)" />
       <button type="submit" disabled={busy}>
         {busy ? "..." : "Create"}
       </button>

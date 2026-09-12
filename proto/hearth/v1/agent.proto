@@ -19,6 +19,7 @@ message CreateWorkspaceRequest {
   ResourceLimits limits = 3;
   string network = 4; // "egress" | "none"
   string userns = 5;  // "keep-id" | "auto"
+  string host_mount_path = 6; // absolute host path, or "" for a managed volume
 }
 
 message DestroyResponse {}

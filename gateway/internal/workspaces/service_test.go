@@ -73,7 +73,7 @@ func (f *fakeStore) CreateWorkspace(_ context.Context, p gen.CreateWorkspacePara
 	id := f.mkID()
 	ws := gen.Workspace{
 		ID: id, OwnerID: p.OwnerID, Name: p.Name, Image: p.Image,
-		State: "creating", AgentID: p.AgentID,
+		State: "creating", AgentID: p.AgentID, HostMountPath: p.HostMountPath,
 	}
 	f.rows[store.UUIDString(id)] = ws
 	return ws, nil
@@ -272,7 +272,7 @@ func TestCreatePlacesAndRunsWorkspace(t *testing.T) {
 	dial := &fakeDialer{client: &fakeAgentClient{}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -301,12 +301,39 @@ func TestCreatePlacesAndRunsWorkspace(t *testing.T) {
 	}
 }
 
+func TestCreateWithHostMountPathPersistsAndForwardsIt(t *testing.T) {
+	st := newFakeStore()
+	var capturedReq *hv1.CreateWorkspaceRequest
+	dial := &fakeDialer{client: &fakeAgentClient{
+		createFn: func(_ context.Context, in *hv1.CreateWorkspaceRequest) (*hv1.Workspace, error) {
+			capturedReq = in
+			return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_RUNNING, ContainerId: "cont-" + in.WorkspaceId}, nil
+		},
+	}}
+	s := newTestService(t, st, readyRegistry(), dial, nil)
+
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "/home/dayson/homelab")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ws.HostMountPath == nil || *ws.HostMountPath != "/home/dayson/homelab" {
+		t.Fatalf("returned HostMountPath = %v, want /home/dayson/homelab", ws.HostMountPath)
+	}
+	if capturedReq == nil || capturedReq.HostMountPath != "/home/dayson/homelab" {
+		t.Fatalf("agent request HostMountPath = %q, want /home/dayson/homelab", capturedReq.GetHostMountPath())
+	}
+	stored, ok := st.get(ws.ID)
+	if !ok || stored.HostMountPath == nil || *stored.HostMountPath != "/home/dayson/homelab" {
+		t.Fatalf("stored HostMountPath = %v", stored.HostMountPath)
+	}
+}
+
 func TestCreateWithNoAgentReturnsErrNoAgent(t *testing.T) {
 	st := newFakeStore()
 	reg := fakeRegistry{pickErr: agentregistry.ErrNoAgent}
 	s := newTestService(t, st, reg, &fakeDialer{client: &fakeAgentClient{}}, nil)
 
-	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if !errors.Is(err, ErrNoAgent) {
 		t.Fatalf("err = %v, want ErrNoAgent", err)
 	}
@@ -324,7 +351,7 @@ func TestCreateAgentFailureLeavesErrorRow(t *testing.T) {
 	}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if !errors.Is(err, ErrAgentCall) {
 		t.Fatalf("err = %v, want ErrAgentCall", err)
 	}
@@ -348,7 +375,7 @@ func TestCreatePlacementWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 	st.placementErr = errors.New("db down")
 	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
-	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err == nil {
 		t.Fatal("Create returned nil error on a failed placement write")
 	}
@@ -369,7 +396,7 @@ func TestStopStateWriteFailureRecordsEventAndKeepsRow(t *testing.T) {
 	st := newFakeStore()
 	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -394,7 +421,7 @@ func TestCreateRejectsEmptyName(t *testing.T) {
 	st := newFakeStore()
 	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
-	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "   ", "")
+	_, err := s.Create(context.Background(), mustUUID(t, ownerAID), "   ", "", "")
 	if !errors.Is(err, ErrNoName) {
 		t.Fatalf("err = %v, want ErrNoName", err)
 	}
@@ -407,7 +434,7 @@ func TestGetIsOwnerScoped(t *testing.T) {
 	st := newFakeStore()
 	s := newTestService(t, st, readyRegistry(), &fakeDialer{client: &fakeAgentClient{}}, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -424,7 +451,7 @@ func TestStopUpdatesStateFromAgent(t *testing.T) {
 	dial := &fakeDialer{client: &fakeAgentClient{}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -453,7 +480,7 @@ func TestStopAgentErrorStateReturnsErrAgentCall(t *testing.T) {
 	}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -475,7 +502,7 @@ func TestStopIdleUpdatesStateAndWritesIdleStoppedEvent(t *testing.T) {
 	dial := &fakeDialer{client: &fakeAgentClient{}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -517,7 +544,7 @@ func TestStopIdleAgentErrorParksRow(t *testing.T) {
 	}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -542,7 +569,7 @@ func TestStartAfterStopRefreshesActivity(t *testing.T) {
 	tracker := activity.NewTrackerWithClock(func() time.Time { return clockTime })
 	s := newTestService(t, st, readyRegistry(), dial, tracker)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -576,7 +603,7 @@ func TestDestroyRemovesRowOnAgentSuccess(t *testing.T) {
 	dial := &fakeDialer{client: &fakeAgentClient{}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -600,7 +627,7 @@ func TestDestroyAgentFailureLeavesErrorRow(t *testing.T) {
 	}}
 	s := newTestService(t, st, readyRegistry(), dial, nil)
 
-	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "")
+	ws, err := s.Create(context.Background(), mustUUID(t, ownerAID), "dev", "", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

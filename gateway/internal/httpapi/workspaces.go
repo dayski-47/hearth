@@ -27,13 +27,14 @@ type workspaceHandlers struct {
 // workspaceJSON is the wire shape of a workspace. host_id carries the placement
 // (the agent id); container_id is absent until the agent reports one.
 type workspaceJSON struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Image       string    `json:"image"`
-	State       string    `json:"state"`
-	HostID      string    `json:"host_id"`
-	ContainerID string    `json:"container_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Image         string    `json:"image"`
+	State         string    `json:"state"`
+	HostID        string    `json:"host_id"`
+	ContainerID   string    `json:"container_id,omitempty"`
+	HostMountPath string    `json:"host_mount_path,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func toWorkspaceJSON(ws gen.Workspace) workspaceJSON {
@@ -50,17 +51,23 @@ func toWorkspaceJSON(ws gen.Workspace) workspaceJSON {
 	if ws.ContainerID != nil {
 		out.ContainerID = *ws.ContainerID
 	}
+	if ws.HostMountPath != nil {
+		out.HostMountPath = *ws.HostMountPath
+	}
 	return out
 }
 
 func (h *workspaceHandlers) create(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFromContext(r.Context())
-	var req struct{ Name, Image string }
+	var req struct {
+		Name, Image   string
+		HostMountPath string `json:"host_mount_path"`
+	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	ws, err := h.svc.Create(r.Context(), u.ID, req.Name, req.Image)
+	ws, err := h.svc.Create(r.Context(), u.ID, req.Name, req.Image, req.HostMountPath)
 	switch {
 	case errors.Is(err, workspaces.ErrNoName):
 		writeJSONError(w, http.StatusBadRequest, "name is required")

@@ -124,6 +124,39 @@ the variable afterward, so the gateway's connection string would change while
 the database password would not. To change it later you have to delete the
 `pgdata` volume as well, which wipes the database.
 
+## Persistent host-mounted workspaces
+
+By default every workspace gets a fresh, disposable volume that is removed
+when the workspace is destroyed. To instead point a workspace at a real
+directory on the host (so the same files persist across sessions), set
+`HEARTH_HOST_MOUNTS` to a comma-separated list of absolute paths the agent
+is allowed to bind-mount, for example:
+
+```
+HEARTH_HOST_MOUNTS=/home/you/projects,/srv/data
+```
+
+`HEARTH_HOST_MOUNTS` is read once at agent startup, so restart it after
+editing the list:
+
+```
+systemctl --user restart hearth-agent
+```
+
+To use one of those paths, set it as the "host path (optional)" field in
+the dashboard's New Workspace form, or pass `host_mount_path` in a
+`POST /api/workspaces` request body. A path that is not in the list is
+rejected; there is no partial or prefix matching. Destroying a workspace
+created this way never deletes the real directory - only the container
+goes away.
+
+A bind-mounted workspace runs as your host user (via `keep-id`) with full
+read and write access to whatever directory you allow, so list the
+narrowest directory that does the job, and never one containing
+credentials, `.ssh`, or Hearth's own `.env` file. Removing a path from
+`HEARTH_HOST_MOUNTS` only stops new workspaces from using it; a workspace
+that already has it bind-mounted keeps access until it is destroyed.
+
 ## Using your own base image
 
 Every workspace starts from one OCI image, named by `HEARTH_WORKSPACE_IMAGE`

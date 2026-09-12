@@ -7,16 +7,26 @@ use hearth_common::workspace_container_name;
 use hearth_proto::hearth::v1::{CreateWorkspaceRequest, Workspace, WorkspaceState};
 
 use crate::engine::{
-    ContainerEngine, ContainerRunState, NetworkMode, WorkspaceContainerSpec, EGRESS_NETWORK,
+    ContainerEngine, ContainerRunState, MountSource, NetworkMode, WorkspaceContainerSpec,
+    EGRESS_NETWORK,
 };
 
 pub struct Lifecycle<E: ContainerEngine> {
     engine: Arc<E>,
     host_id: String,
+    host_mounts: Vec<String>,
 }
 
-pub fn new<E: ContainerEngine>(engine: Arc<E>, host_id: String) -> Lifecycle<E> {
-    Lifecycle { engine, host_id }
+pub fn new<E: ContainerEngine>(
+    engine: Arc<E>,
+    host_id: String,
+    host_mounts: Vec<String>,
+) -> Lifecycle<E> {
+    Lifecycle {
+        engine,
+        host_id,
+        host_mounts,
+    }
 }
 
 impl<E: ContainerEngine> Lifecycle<E> {
@@ -55,13 +65,21 @@ impl<E: ContainerEngine> Lifecycle<E> {
             _ => NetworkMode::Egress,
         };
         let limits = req.limits.unwrap_or_default();
+        let mount = if req.host_mount_path.is_empty() {
+            MountSource::Volume(workspace_container_name(id))
+        } else if self.host_mounts.iter().any(|p| p == &req.host_mount_path) {
+            MountSource::Bind(req.host_mount_path.clone())
+        } else {
+            anyhow::bail!(
+                "host_mount_path {:?} is not in the configured allowlist",
+                req.host_mount_path
+            );
+        };
+        let is_bind = matches!(&mount, MountSource::Bind(_));
         let spec = WorkspaceContainerSpec {
             name: workspace_container_name(id),
             image: req.image.clone(),
-            // The volume shares the workspace id with the container by design:
-            // exactly one volume per workspace, mounted at /workspace, removed
-            // with it.
-            volume: workspace_container_name(id),
+            mount,
             network: network.clone(),
             userns: req.userns.clone(),
             cpu_millis: limits.cpu_millis,
@@ -72,9 +90,11 @@ impl<E: ContainerEngine> Lifecycle<E> {
         if matches!(network, NetworkMode::Egress) {
             self.engine.ensure_network(EGRESS_NETWORK).await?;
         }
-        self.engine
-            .create_volume(&workspace_container_name(id))
-            .await?;
+        if !is_bind {
+            self.engine
+                .create_volume(&workspace_container_name(id))
+                .await?;
+        }
         let cid = self.engine.create_container(spec).await?;
         self.engine.start(&workspace_container_name(id)).await?;
         tracing::info!(workspace_id = %id, container_id = %cid, "workspace running");
@@ -202,13 +222,14 @@ mod tests {
             }),
             network: "egress".into(),
             userns: "keep-id".into(),
+            host_mount_path: String::new(),
         }
     }
 
     #[tokio::test]
     async fn create_pulls_makes_volume_and_starts_running() {
         let eng = Arc::new(FakeEngine::new(ContainerRunState::Running));
-        let lc = new(eng.clone(), "h1".into());
+        let lc = new(eng.clone(), "h1".into(), Vec::new());
         let ws = lc.create(req("w1")).await;
         assert_eq!(ws.state, WorkspaceState::Running as i32);
         assert_eq!(ws.container_id, "cid-1");
@@ -232,7 +253,7 @@ mod tests {
             fail: Some("create_container"),
             ..FakeEngine::new(ContainerRunState::Missing)
         });
-        let lc = new(eng, "h1".into());
+        let lc = new(eng, "h1".into(), Vec::new());
         let ws = lc.create(req("w2")).await;
         assert_eq!(ws.state, WorkspaceState::Error as i32);
         assert!(ws.message.contains("create_container"));
@@ -245,7 +266,7 @@ mod tests {
             (ContainerRunState::Stopped, WorkspaceState::Stopped),
             (ContainerRunState::Missing, WorkspaceState::Error),
         ] {
-            let lc = new(Arc::new(FakeEngine::new(rs)), "h1".into());
+            let lc = new(Arc::new(FakeEngine::new(rs)), "h1".into(), Vec::new());
             let ws = lc.get("w1").await;
             assert_eq!(ws.state, want as i32, "{rs:?}");
         }
@@ -254,9 +275,51 @@ mod tests {
     #[tokio::test]
     async fn destroy_removes_container_then_volume() {
         let eng = Arc::new(FakeEngine::new(ContainerRunState::Stopped));
-        let lc = new(eng.clone(), "h1".into());
+        let lc = new(eng.clone(), "h1".into(), Vec::new());
         lc.destroy("w1").await.unwrap();
         let calls = eng.calls.lock().unwrap().clone();
         assert_eq!(calls, ["remove", "remove_volume"]);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_a_host_mount_path_outside_the_allowlist() {
+        let eng = Arc::new(FakeEngine::new(ContainerRunState::Running));
+        let lc = new(
+            eng.clone(),
+            "h1".into(),
+            vec!["/home/dayson/homelab".into()],
+        );
+        let mut r = req("w1");
+        r.host_mount_path = "/etc".into();
+
+        let ws = lc.create(r).await;
+
+        assert_eq!(ws.state, WorkspaceState::Error as i32);
+        assert!(
+            eng.calls.lock().unwrap().is_empty(),
+            "no engine call should happen before allowlist validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_with_an_allowed_host_mount_path_skips_create_volume() {
+        let eng = Arc::new(FakeEngine::new(ContainerRunState::Running));
+        let lc = new(
+            eng.clone(),
+            "h1".into(),
+            vec!["/home/dayson/homelab".into()],
+        );
+        let mut r = req("w1");
+        r.host_mount_path = "/home/dayson/homelab".into();
+
+        let ws = lc.create(r).await;
+
+        assert_eq!(ws.state, WorkspaceState::Running as i32, "{}", ws.message);
+        let calls = eng.calls.lock().unwrap().clone();
+        assert!(
+            !calls.contains(&"create_volume".to_string()),
+            "calls = {calls:?}, want no create_volume"
+        );
+        assert!(calls.contains(&"create_container".to_string()));
     }
 }

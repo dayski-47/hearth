@@ -13,7 +13,11 @@ export interface WorkspacesSlice {
     error: string | null;
   };
   fetchWorkspaces: () => Promise<void>;
-  createWorkspace: (name: string, image?: string) => Promise<void>;
+  createWorkspace: (
+    name: string,
+    image?: string,
+    hostMountPath?: string,
+  ) => Promise<void>;
   startWorkspace: (id: string) => Promise<void>;
   stopWorkspace: (id: string) => Promise<void>;
   destroyWorkspace: (id: string) => Promise<void>;
@@ -88,10 +92,14 @@ export const createWorkspacesSlice: StateCreator<
       }
     },
 
-    async createWorkspace(name, image) {
+    async createWorkspace(name, image, hostMountPath) {
       const { data } = await postAllowing<Workspace>(
         "/api/workspaces",
-        { name, ...(image ? { image } : {}) },
+        {
+          name,
+          ...(image ? { image } : {}),
+          ...(hostMountPath ? { host_mount_path: hostMountPath } : {}),
+        },
         [502],
       );
       setList((l) => upsert(l, data));

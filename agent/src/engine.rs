@@ -16,10 +16,19 @@ pub enum NetworkMode {
 pub const EGRESS_NETWORK: &str = "hearth-egress";
 
 #[derive(Clone, Debug)]
+pub enum MountSource {
+    /// A Podman-managed volume, created and destroyed with the workspace.
+    Volume(String),
+    /// A directory that already exists on the host, from the self-hoster's
+    /// HEARTH_HOST_MOUNTS allowlist. Never created or removed by Hearth.
+    Bind(String),
+}
+
+#[derive(Clone, Debug)]
 pub struct WorkspaceContainerSpec {
     pub name: String,
     pub image: String,
-    pub volume: String,
+    pub mount: MountSource,
     pub network: NetworkMode,
     pub userns: String,
     pub cpu_millis: u32,
@@ -45,6 +54,11 @@ pub fn workspace_host_config(spec: &WorkspaceContainerSpec) -> HostConfig {
     let mut tmpfs = HashMap::new();
     tmpfs.insert("/tmp".to_string(), "size=64m,mode=1777".to_string());
 
+    let (mount_source, mount_type) = match &spec.mount {
+        MountSource::Volume(name) => (name.clone(), MountTypeEnum::VOLUME),
+        MountSource::Bind(path) => (path.clone(), MountTypeEnum::BIND),
+    };
+
     HostConfig {
         memory: Some(mem),
         memory_swap: Some(mem),
@@ -63,8 +77,8 @@ pub fn workspace_host_config(spec: &WorkspaceContainerSpec) -> HostConfig {
         tmpfs: Some(tmpfs),
         mounts: Some(vec![Mount {
             target: Some("/workspace".to_string()),
-            source: Some(spec.volume.clone()),
-            typ: Some(MountTypeEnum::VOLUME),
+            source: Some(mount_source),
+            typ: Some(mount_type),
             ..Default::default()
         }]),
         ..Default::default()
@@ -304,7 +318,7 @@ mod tests {
         let spec = WorkspaceContainerSpec {
             name: "hearth-ws-abc".into(),
             image: "busybox:stable".into(),
-            volume: "hearth-ws-abc".into(),
+            mount: MountSource::Volume("hearth-ws-abc".into()),
             network: NetworkMode::Egress,
             userns: "keep-id".into(),
             cpu_millis: 2000,
@@ -340,11 +354,32 @@ mod tests {
     }
 
     #[test]
+    fn host_config_bind_mounts_a_host_path() {
+        let spec = WorkspaceContainerSpec {
+            name: "hearth-ws-abc".into(),
+            image: "busybox:stable".into(),
+            mount: MountSource::Bind("/home/dayson/homelab".into()),
+            network: NetworkMode::Egress,
+            userns: "keep-id".into(),
+            cpu_millis: 2000,
+            memory_bytes: 2 << 30,
+            pids: 512,
+        };
+        let hc = workspace_host_config(&spec);
+        let mounts = hc.mounts.as_ref().unwrap();
+        assert!(mounts
+            .iter()
+            .any(|m| m.target.as_deref() == Some("/workspace")
+                && m.source.as_deref() == Some("/home/dayson/homelab")
+                && m.typ == Some(bollard::models::MountTypeEnum::BIND)));
+    }
+
+    #[test]
     fn host_config_none_network_and_auto_userns() {
         let spec = WorkspaceContainerSpec {
             name: "x".into(),
             image: "x".into(),
-            volume: "x".into(),
+            mount: MountSource::Volume("x".into()),
             network: NetworkMode::None,
             userns: "auto".into(),
             cpu_millis: 1000,

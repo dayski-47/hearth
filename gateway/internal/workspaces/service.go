@@ -98,7 +98,7 @@ func (s *Service) limits() *hv1.ResourceLimits {
 // Create picks an agent, writes a "creating" row, drives the agent's
 // CreateWorkspace, and converges the row to "running" or, on any failure, to
 // "error" with an event and ErrAgentCall.
-func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image string) (gen.Workspace, error) {
+func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image, hostMountPath string) (gen.Workspace, error) {
 	if strings.TrimSpace(name) == "" {
 		return gen.Workspace{}, ErrNoName
 	}
@@ -110,8 +110,12 @@ func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image s
 		return gen.Workspace{}, ErrNoAgent
 	}
 	host := agent.ID
+	var hmp *string
+	if hostMountPath != "" {
+		hmp = &hostMountPath
+	}
 	ws, err := s.st.CreateWorkspace(ctx, gen.CreateWorkspaceParams{
-		OwnerID: ownerID, Name: name, Image: image, AgentID: &host,
+		OwnerID: ownerID, Name: name, Image: image, AgentID: &host, HostMountPath: hmp,
 	})
 	if err != nil {
 		return gen.Workspace{}, err
@@ -137,7 +141,7 @@ func (s *Service) Create(ctx context.Context, ownerID pgtype.UUID, name, image s
 	defer cancel()
 	resp, err := client.CreateWorkspace(rpcCtx, &hv1.CreateWorkspaceRequest{
 		WorkspaceId: store.UUIDString(ws.ID), Image: image, Limits: s.limits(),
-		Network: s.def.Network, Userns: s.def.UserNS,
+		Network: s.def.Network, Userns: s.def.UserNS, HostMountPath: hostMountPath,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "agent CreateWorkspace failed", "workspace_id", store.UUIDString(ws.ID), "error", err)

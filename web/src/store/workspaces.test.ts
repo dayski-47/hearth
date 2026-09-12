@@ -117,6 +117,22 @@ test("createWorkspace on 400 throws for the caller", async () => {
   );
 });
 
+test("createWorkspace sends host_mount_path when given", async () => {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ ...wsRunning, id: "hm" }), {
+        status: 201,
+      }),
+  );
+  globalThis.fetch = fetchMock as typeof fetch;
+  await useStore
+    .getState()
+    .createWorkspace("n", undefined, "/home/dayson/homelab");
+  const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  const body = JSON.parse(String(init?.body));
+  expect(body.host_mount_path).toBe("/home/dayson/homelab");
+});
+
 test("startWorkspace merges the returned running row", async () => {
   useStore.setState({
     workspaces: {
