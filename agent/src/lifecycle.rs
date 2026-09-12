@@ -7,7 +7,7 @@ use hearth_common::workspace_container_name;
 use hearth_proto::hearth::v1::{CreateWorkspaceRequest, Workspace, WorkspaceState};
 
 use crate::engine::{
-    ContainerEngine, ContainerRunState, NetworkMode, WorkspaceContainerSpec, EGRESS_NETWORK,
+    ContainerEngine, ContainerRunState, MountSource, NetworkMode, WorkspaceContainerSpec, EGRESS_NETWORK,
 };
 
 pub struct Lifecycle<E: ContainerEngine> {
@@ -61,7 +61,7 @@ impl<E: ContainerEngine> Lifecycle<E> {
             // The volume shares the workspace id with the container by design:
             // exactly one volume per workspace, mounted at /workspace, removed
             // with it.
-            volume: workspace_container_name(id),
+            mount: MountSource::Volume(workspace_container_name(id)),
             network: network.clone(),
             userns: req.userns.clone(),
             cpu_millis: limits.cpu_millis,
