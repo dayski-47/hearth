@@ -13,6 +13,7 @@ export interface Workspace {
   state: WorkspaceState;
   host_id: string;
   container_id?: string;
+  host_mount_path?: string;
   created_at: string;
 }
 

@@ -18,7 +18,26 @@ test("opens, validates a blank name, then creates", async () => {
 
   await userEvent.type(screen.getByPlaceholderText("name"), "scratch");
   await userEvent.click(screen.getByRole("button", { name: "Create" }));
-  expect(create).toHaveBeenCalledWith("scratch", undefined);
+  expect(create).toHaveBeenCalledWith("scratch", undefined, undefined);
+});
+
+test("sends the host path when given", async () => {
+  const create = vi.fn().mockResolvedValue(undefined);
+  useStore.setState({ createWorkspace: create });
+
+  render(<NewWorkspaceForm />);
+  await userEvent.click(screen.getByRole("button", { name: "+ New workspace" }));
+  await userEvent.type(screen.getByPlaceholderText("name"), "scratch");
+  await userEvent.type(
+    screen.getByPlaceholderText("host path (optional)"),
+    "/home/dayson/homelab",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Create" }));
+  expect(create).toHaveBeenCalledWith(
+    "scratch",
+    undefined,
+    "/home/dayson/homelab",
+  );
 });
 
 test("surfaces a create error", async () => {
