@@ -50,9 +50,14 @@ func (stubRegistry) Addr(id string) (string, bool) {
 type scriptedAgent struct {
 	startFn func(*hv1.WorkspaceRef) (*hv1.Workspace, error)
 	stopFn  func(*hv1.WorkspaceRef) (*hv1.Workspace, error)
+
+	// createReq captures the request CreateWorkspace last received, so a
+	// test can assert on what the gateway actually sent to the agent.
+	createReq *hv1.CreateWorkspaceRequest
 }
 
 func (a *scriptedAgent) CreateWorkspace(_ context.Context, in *hv1.CreateWorkspaceRequest, _ ...grpc.CallOption) (*hv1.Workspace, error) {
+	a.createReq = in
 	return &hv1.Workspace{WorkspaceId: in.WorkspaceId, State: hv1.WorkspaceState_RUNNING, ContainerId: "cid-1"}, nil
 }
 
@@ -337,4 +342,38 @@ func TestWorkspaceCRUDOverHTTP(t *testing.T) {
 		t.Fatalf("create blank name: %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+}
+
+// TestCreateWorkspaceWithHostMountPathOverHTTP proves the JSON key the
+// browser sends for a persistent workspace, host_mount_path, is the same
+// key the Go handler decodes and forwards to the agent, through a real
+// HTTP request against this file's test harness.
+func TestCreateWorkspaceWithHostMountPathOverHTTP(t *testing.T) {
+	srv, cookie, agent := newWorkspaceTestServer(t)
+	c := srv.Client()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/workspaces",
+		strings.NewReader(`{"name":"proj","host_mount_path":"/srv/data"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	req.Header.Set("X-Hearth-CSRF", "1")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d", resp.StatusCode)
+	}
+	var created map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if created["host_mount_path"] != "/srv/data" {
+		t.Fatalf("created host_mount_path = %v, want /srv/data", created["host_mount_path"])
+	}
+	if agent.createReq == nil || agent.createReq.HostMountPath != "/srv/data" {
+		t.Fatalf("agent received HostMountPath = %v, want /srv/data", agent.createReq.GetHostMountPath())
+	}
 }
