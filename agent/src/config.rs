@@ -15,11 +15,29 @@ pub struct Config {
     pub advertise_addr: String,
     pub workspace_addr: String,
     pub podman_socket: Option<String>,
+    pub host_mounts: Vec<String>,
     pub tls: TlsPaths,
 }
 
 fn req(key: &str) -> Result<String> {
     std::env::var(key).map_err(|_| anyhow!("{key} is required"))
+}
+
+/// Self-hoster-configured allowlist of host directories a workspace may
+/// bind-mount instead of getting a fresh managed volume. Empty means the
+/// feature is off - a fresh clone with no configuration behaves exactly as
+/// it always has.
+fn host_mounts() -> Vec<String> {
+    std::env::var("HEARTH_HOST_MOUNTS")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn load() -> Result<Config> {
@@ -32,6 +50,7 @@ pub fn load() -> Result<Config> {
         podman_socket: std::env::var("HEARTH_PODMAN_SOCKET")
             .ok()
             .filter(|s| !s.is_empty()),
+        host_mounts: host_mounts(),
         tls: TlsPaths {
             ca: req("HEARTH_TLS_CA")?,
             cert: req("HEARTH_AGENT_TLS_CERT")?,
@@ -56,5 +75,20 @@ mod tests {
         std::env::set_var("HEARTH_AGENT_TLS_CERT", "a.pem");
         std::env::set_var("HEARTH_AGENT_TLS_KEY", "a-key.pem");
         assert!(load().is_err());
+    }
+
+    #[test]
+    fn host_mounts_defaults_empty() {
+        let _g = crate::test_env_lock();
+        std::env::remove_var("HEARTH_HOST_MOUNTS");
+        assert!(host_mounts().is_empty());
+    }
+
+    #[test]
+    fn host_mounts_splits_and_trims_commas() {
+        let _g = crate::test_env_lock();
+        std::env::set_var("HEARTH_HOST_MOUNTS", "/a, /b ,, /c");
+        assert_eq!(host_mounts(), vec!["/a", "/b", "/c"]);
+        std::env::remove_var("HEARTH_HOST_MOUNTS");
     }
 }
