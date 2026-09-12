@@ -133,6 +133,79 @@ async fn create_get_stop_destroy_busybox() {
     assert_eq!(lc.get(&id).await.state, WorkspaceState::Error as i32); // container gone
 }
 
+async fn exec_output(docker: &bollard::Docker, container: &str, cmd: &[&str]) -> String {
+    use bollard::exec::{CreateExecOptions, StartExecResults};
+    use futures_util::StreamExt;
+    let exec = docker
+        .create_exec(
+            container,
+            CreateExecOptions {
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                cmd: Some(cmd.iter().map(|s| s.to_string()).collect()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create exec");
+    let mut out = Vec::new();
+    if let StartExecResults::Attached { mut output, .. } =
+        docker.start_exec(&exec.id, None).await.expect("start exec")
+    {
+        while let Some(Ok(chunk)) = output.next().await {
+            out.extend_from_slice(&chunk.into_bytes());
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+#[tokio::test]
+async fn create_with_a_host_mount_path_bind_mounts_the_real_directory() {
+    let Some(engine) = podman() else {
+        eprintln!("skipped: set HEARTH_PODMAN_IT=1 (and HEARTH_PODMAN_SOCKET) to run");
+        return;
+    };
+    let engine = Arc::new(engine);
+    let tmp = std::env::temp_dir().join(format!("hearth-host-mount-it-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).expect("create temp dir");
+    std::fs::write(tmp.join("marker.txt"), b"from-the-real-host\n").expect("write marker");
+
+    let host_path = tmp.to_str().expect("utf8 path").to_string();
+    let lc = lifecycle::new(engine.clone(), "it-host".into(), vec![host_path.clone()]);
+    let id = format!("it-bind-{}", std::process::id());
+
+    let mut req = request(&id, "none");
+    req.host_mount_path = host_path.clone();
+    let ws = lc.create(req).await;
+    assert_eq!(ws.state, WorkspaceState::Running as i32, "{}", ws.message);
+
+    let container = format!("hearth-ws-{id}");
+    let content = exec_output(
+        engine.docker(),
+        &container,
+        &["cat", "/workspace/marker.txt"],
+    )
+    .await;
+    assert_eq!(content, "from-the-real-host\n");
+
+    // Vice versa: something the container writes lands on the real host.
+    exec_output(
+        engine.docker(),
+        &container,
+        &[
+            "sh",
+            "-c",
+            "echo from-the-container > /workspace/from-container.txt",
+        ],
+    )
+    .await;
+    let seen = std::fs::read_to_string(tmp.join("from-container.txt")).expect("read back on host");
+    assert_eq!(seen, "from-the-container\n");
+
+    lc.destroy(&id).await.expect("destroy");
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
 /// The production default is `network=egress`, which means every create calls
 /// `ensure_network` on an already-existing network. Two back-to-back creates is
 /// the smallest thing that catches a non-idempotent implementation.
