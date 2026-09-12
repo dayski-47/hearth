@@ -7,7 +7,8 @@ use hearth_common::workspace_container_name;
 use hearth_proto::hearth::v1::{CreateWorkspaceRequest, Workspace, WorkspaceState};
 
 use crate::engine::{
-    ContainerEngine, ContainerRunState, MountSource, NetworkMode, WorkspaceContainerSpec, EGRESS_NETWORK,
+    ContainerEngine, ContainerRunState, MountSource, NetworkMode, WorkspaceContainerSpec,
+    EGRESS_NETWORK,
 };
 
 pub struct Lifecycle<E: ContainerEngine> {
