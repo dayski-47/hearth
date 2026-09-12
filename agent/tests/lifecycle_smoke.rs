@@ -203,6 +203,11 @@ async fn create_with_a_host_mount_path_bind_mounts_the_real_directory() {
     assert_eq!(seen, "from-the-container\n");
 
     lc.destroy(&id).await.expect("destroy");
+    assert!(
+        tmp.join("marker.txt").exists(),
+        "destroy must not touch the host directory"
+    );
+    assert!(tmp.join("from-container.txt").exists());
     std::fs::remove_dir_all(&tmp).ok();
 }
 
