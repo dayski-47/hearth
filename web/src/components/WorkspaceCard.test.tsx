@@ -55,6 +55,27 @@ test("stopped workspace: Start calls the action, Destroy is present", async () =
   ).toBeInTheDocument();
 });
 
+test("workspace with a host mount path shows it in the meta line", () => {
+  render(
+    <MemoryRouter future={future}>
+      <WorkspaceCard
+        ws={{ ...base, state: "running", host_mount_path: "/srv/data" }}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText(/\/srv\/data/)).toBeInTheDocument();
+});
+
+test("workspace without a host mount path renders no extra separator", () => {
+  render(
+    <MemoryRouter future={future}>
+      <WorkspaceCard ws={{ ...base, state: "running" }} />
+    </MemoryRouter>,
+  );
+  const meta = screen.getByText(/busybox:stable/);
+  expect(meta.textContent?.split("·")).toHaveLength(2);
+});
+
 test("creating workspace: actions are disabled, no Destroy", () => {
   useStore.setState({
     startWorkspace: vi.fn(),

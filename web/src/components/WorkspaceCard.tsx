@@ -18,6 +18,7 @@ export default function WorkspaceCard({ ws }: { ws: Workspace }) {
       </header>
       <p className="ws-meta">
         {ws.image} &middot; {relativeTime(ws.created_at)}
+        {ws.host_mount_path && <> &middot; {ws.host_mount_path}</>}
       </p>
       <div className="ws-actions">
         {ws.state === "running" && (
