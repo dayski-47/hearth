@@ -48,8 +48,8 @@ DELETE FROM sessions WHERE id = $1;
 DELETE FROM sessions WHERE expires_at < now();
 
 -- name: CreateWorkspace :one
-INSERT INTO workspaces (owner_id, name, image, agent_id, state)
-VALUES ($1, $2, $3, $4, 'creating')
+INSERT INTO workspaces (owner_id, name, image, agent_id, host_mount_path, state)
+VALUES ($1, $2, $3, $4, $5, 'creating')
 RETURNING *;
 
 -- name: GetWorkspaceForOwner :one
