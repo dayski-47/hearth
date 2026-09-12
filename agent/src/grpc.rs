@@ -15,9 +15,9 @@ pub struct AgentSvc<E: ContainerEngine> {
 }
 
 impl<E: ContainerEngine> AgentSvc<E> {
-    pub fn new(engine: Arc<E>, host_id: String) -> Self {
+    pub fn new(engine: Arc<E>, host_id: String, host_mounts: Vec<String>) -> Self {
         Self {
-            lifecycle: Arc::new(crate::lifecycle::new(engine, host_id)),
+            lifecycle: Arc::new(crate::lifecycle::new(engine, host_id, host_mounts)),
         }
     }
 }
@@ -79,7 +79,11 @@ where
         .grpc_listen_addr
         .parse()
         .context("parse grpc listen addr")?;
-    let svc = AgentSvc::new(Arc::new(engine), cfg.host_id.clone());
+    let svc = AgentSvc::new(
+        Arc::new(engine),
+        cfg.host_id.clone(),
+        cfg.host_mounts.clone(),
+    );
     let tls_config = tls::server_config(&cfg.tls)?;
     tracing::info!(%addr, "agent grpc listening");
     Server::builder()
@@ -158,7 +162,7 @@ mod tests {
     #[tokio::test]
     async fn create_workspace_returns_running() {
         let eng = Arc::new(FakeEngine::new(ContainerRunState::Running));
-        let svc = AgentSvc::new(eng, "h1".into());
+        let svc = AgentSvc::new(eng, "h1".into(), Vec::new());
         let ws = svc
             .create_workspace(Request::new(CreateWorkspaceRequest {
                 workspace_id: "w1".into(),
@@ -166,6 +170,7 @@ mod tests {
                 limits: None,
                 network: "none".into(),
                 userns: "auto".into(),
+                host_mount_path: String::new(),
             }))
             .await
             .unwrap()
@@ -179,7 +184,7 @@ mod tests {
             fail: Some("remove"),
             ..FakeEngine::new(ContainerRunState::Stopped)
         });
-        let svc = AgentSvc::new(eng, "h1".into());
+        let svc = AgentSvc::new(eng, "h1".into(), Vec::new());
         let err = svc
             .destroy_workspace(Request::new(WorkspaceRef {
                 workspace_id: "w1".into(),

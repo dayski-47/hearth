@@ -36,6 +36,7 @@ fn request(id: &str, network: &str) -> CreateWorkspaceRequest {
         }),
         network: network.to_string(),
         userns: "keep-id".into(),
+        host_mount_path: String::new(),
     }
 }
 
@@ -46,7 +47,7 @@ async fn create_get_stop_destroy_busybox() {
         return;
     };
     let engine = Arc::new(engine);
-    let lc = lifecycle::new(engine.clone(), "it-host".into());
+    let lc = lifecycle::new(engine.clone(), "it-host".into(), Vec::new());
     let id = format!("it-{}", std::process::id());
 
     let ws = lc.create(request(&id, "none")).await;
@@ -141,7 +142,7 @@ async fn two_egress_workspaces_can_be_created() {
         eprintln!("skipped: set HEARTH_PODMAN_IT=1 (and HEARTH_PODMAN_SOCKET) to run");
         return;
     };
-    let lc = lifecycle::new(Arc::new(engine), "it-host".into());
+    let lc = lifecycle::new(Arc::new(engine), "it-host".into(), Vec::new());
     let base = format!("egress-{}", std::process::id());
     let (first, second) = (format!("{base}-a"), format!("{base}-b"));
 
