@@ -29,6 +29,7 @@ export default function Workspace() {
   const [ws, setWs] = useState<Ws | null>(cached ?? null);
   const [err, setErr] = useState<string | null>(null);
   const [termVisible, setTermVisible] = useState(true);
+  const [termGaveUp, setTermGaveUp] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -61,14 +62,38 @@ export default function Workspace() {
     closeWorkspaceEditor,
   ]);
 
-  // While the workspace's host is unreachable, keep checking until reconcile
-  // resolves it (see the unknown branch below) instead of making the user
-  // refresh the page themselves.
+  // Once the workspace resolves to anything other than "running", any
+  // give-up from before is no longer relevant - without this, a workspace
+  // that settles to "stopped" (or any other definitive state) while
+  // termGaveUp is still true would keep the bridging poll below running
+  // forever, and if the workspace is later restarted, polling would
+  // immediately resume even though there is no active give-up anymore.
   useEffect(() => {
-    if (ws?.state !== "unknown") return;
-    const t = setInterval(() => void load(), 3000);
+    if (ws?.state !== "running") setTermGaveUp(false);
+  }, [ws?.state]);
+
+  // While the workspace's host is unreachable, or the terminal just gave up
+  // reconnecting, keep checking until reconcile resolves it (see the
+  // unknown branch below) instead of leaving the user stuck on the
+  // terminal's own "Disconnected" bar. A give-up usually happens well
+  // before the backend has actually marked the host unreachable, so the
+  // single check onGiveUp fires often still reads "running" - bridge that
+  // gap with a few more checks, capped in case it was a plain blip and the
+  // workspace never leaves "running" (the user's own Reconnect button
+  // already covers that case).
+  useEffect(() => {
+    if (ws?.state !== "unknown" && !termGaveUp) return;
+    let attempts = 0;
+    const t = setInterval(() => {
+      attempts += 1;
+      void load();
+      if (termGaveUp && ws?.state !== "unknown" && attempts >= 20) {
+        clearInterval(t);
+        setTermGaveUp(false);
+      }
+    }, 3000);
     return () => clearInterval(t);
-  }, [ws?.state, load]);
+  }, [ws?.state, termGaveUp, load]);
 
   if (err) {
     return (
@@ -123,7 +148,10 @@ export default function Workspace() {
     <TerminalPane
       workspaceId={ws.id}
       visible={narrow ? pane === "terminal" : termVisible}
-      onGiveUp={() => void load()}
+      onGiveUp={() => {
+        setTermGaveUp(true);
+        void load();
+      }}
     />
   ) : (
     <div className="pane pane-term">
