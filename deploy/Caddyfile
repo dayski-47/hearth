@@ -1,5 +1,20 @@
-{$HEARTH_DOMAIN} {
+(app) {
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 	reverse_proxy gateway:8080
+}
+
+# A real domain gets Let's Encrypt automatically (Caddy's default). Caddy
+# already self-signs for "localhost" and bare IPs on its own, but that only
+# covers requests whose Host/SNI matches HEARTH_DOMAIN exactly - so this
+# catch-all handles anyone hitting the server by an IP that doesn't match.
+{$HEARTH_DOMAIN} {
+	import app
+}
+
+:443 {
+	tls internal {
+		on_demand
+	}
+	import app
 }
