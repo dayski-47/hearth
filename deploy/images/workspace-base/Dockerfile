@@ -13,7 +13,7 @@ ARG NODE_VERSION=22
 ARG RUST_VERSION=1.98.0
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       ca-certificates curl wget git openssh-client \
       build-essential pkg-config \
       python3 python3-venv python3-pip \
@@ -26,10 +26,12 @@ RUN arch="${TARGETARCH:-amd64}" \
  && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz \
  && go version
 
-# Node.js (NodeSource)
+# Node.js (NodeSource). The bundled npm lags behind and carries known CVEs
+# in its vendored deps (tar, brace-expansion, ...); replace it with latest.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/* \
+ && npm install -g npm@latest \
  && node --version && npm --version
 
 # A non-root default user; the workspace volume mounts at /workspace.
