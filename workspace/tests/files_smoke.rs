@@ -11,6 +11,8 @@
 
 use std::sync::Arc;
 
+use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions};
+use bollard::models::{HostConfig, Mount, MountTypeEnum};
 use bollard::volume::{CreateVolumeOptions, RemoveVolumeOptions};
 use futures_util::StreamExt;
 use hearth_proto::hearth::v1::{
@@ -37,39 +39,206 @@ async fn file_rpcs_round_trip_against_a_volume() {
     let exec = PodmanExec::connect(socket.as_deref()).expect("connect to podman");
     let docker = exec.docker().clone();
 
-    // `workspace_container_name(id)` == `hearth-ws-<id>`, and Files looks the
-    // volume up under that same name, so the id and the volume name must line up.
+    // `workspace_container_name(id)` == `hearth-ws-<id>`, and it names both
+    // the volume and the container - `Files::root` resolves the container's
+    // own `/workspace` mount, which is why both exist here even though this
+    // test never starts the container.
     let id = format!("fs{}", std::process::id());
-    let volume = format!("hearth-ws-{id}");
+    let name = format!("hearth-ws-{id}");
 
     // Clear anything a crashed run left behind.
     let _ = docker
-        .remove_volume(&volume, Some(RemoveVolumeOptions { force: true }))
+        .remove_container(
+            &name,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+    let _ = docker
+        .remove_volume(&name, Some(RemoveVolumeOptions { force: true }))
         .await;
 
     docker
         .create_volume(CreateVolumeOptions {
-            name: volume.clone(),
+            name: name.clone(),
             ..Default::default()
         })
         .await
         .expect("create volume");
 
-    let result = run(&docker, exec, &id, &volume).await;
+    docker
+        .create_container(
+            Some(CreateContainerOptions {
+                name: name.clone(),
+                platform: None,
+            }),
+            Config {
+                image: Some("docker.io/library/busybox:stable".to_string()),
+                host_config: Some(HostConfig {
+                    mounts: Some(vec![Mount {
+                        target: Some("/workspace".to_string()),
+                        source: Some(name.clone()),
+                        typ: Some(MountTypeEnum::VOLUME),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create container with a volume mount");
+
+    let result = run(&docker, exec, &id, &name).await;
 
     let _ = docker
-        .remove_volume(&volume, Some(RemoveVolumeOptions { force: true }))
+        .remove_container(
+            &name,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+    let _ = docker
+        .remove_volume(&name, Some(RemoveVolumeOptions { force: true }))
         .await;
 
     result.expect("file rpc round trip");
 }
 
-async fn run(
+/// A bind-mounted workspace (persistent host-mounted workspaces feature) has
+/// no Podman volume at all - the container mounts a real host directory
+/// straight into `/workspace`. `Files::root` must resolve that from the
+/// container's own mount config, not from `inspect_volume`.
+#[tokio::test]
+async fn file_rpcs_round_trip_against_a_bind_mount() {
+    if std::env::var("HEARTH_PODMAN_IT").as_deref() != Ok("1") {
+        eprintln!("skipped: set HEARTH_PODMAN_IT=1 (and HEARTH_PODMAN_SOCKET) to run");
+        return;
+    }
+
+    let socket = std::env::var("HEARTH_PODMAN_SOCKET").ok();
+    let exec = PodmanExec::connect(socket.as_deref()).expect("connect to podman");
+    let docker = exec.docker().clone();
+
+    let id = format!("fsbind{}", std::process::id());
+    let name = format!("hearth-ws-{id}");
+    let host_dir = tempfile::tempdir().expect("host tempdir");
+    std::fs::write(host_dir.path().join("seeded.txt"), b"from the host").unwrap();
+
+    let _ = docker
+        .remove_container(
+            &name,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+
+    docker
+        .create_container(
+            Some(CreateContainerOptions {
+                name: name.clone(),
+                platform: None,
+            }),
+            Config {
+                image: Some("docker.io/library/busybox:stable".to_string()),
+                host_config: Some(HostConfig {
+                    mounts: Some(vec![Mount {
+                        target: Some("/workspace".to_string()),
+                        source: Some(host_dir.path().to_string_lossy().to_string()),
+                        typ: Some(MountTypeEnum::BIND),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create container with a bind mount");
+
+    let result = run_against_bind_mount(&docker, exec, &id, host_dir.path()).await;
+
+    let _ = docker
+        .remove_container(
+            &name,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+
+    result.expect("file rpc round trip against a bind mount");
+}
+
+async fn run_against_bind_mount(
     docker: &bollard::Docker,
     exec: PodmanExec,
     id: &str,
-    volume: &str,
+    host_dir: &std::path::Path,
 ) -> Result<(), String> {
+    let (mut client, server) = serve(docker, exec).await?;
+
+    // The pre-existing host file is visible immediately - no create_node or
+    // write_file involved, so this exercises `root()` on its own.
+    let got = read_all(&mut client, id, "seeded.txt").await;
+    if got.as_deref() != Ok(b"from the host".as_slice()) {
+        server.abort();
+        return Err(format!(
+            "read_file seeded.txt = {got:?}, want the seeded content"
+        ));
+    }
+
+    // Writing through the RPC lands on the real host directory.
+    let write_result = client
+        .write_file(tokio_stream::iter(vec![
+            WriteFileFrame {
+                msg: Some(Msg::Init(WriteFileInit {
+                    workspace_id: id.to_string(),
+                    path: "written.txt".into(),
+                })),
+            },
+            WriteFileFrame {
+                msg: Some(Msg::Data(b"from the container".to_vec())),
+            },
+            WriteFileFrame {
+                msg: Some(Msg::End(WriteFileEnd {})),
+            },
+        ]))
+        .await;
+    server.abort();
+    write_result.map_err(|e| format!("write_file: {e}"))?;
+
+    let on_disk = std::fs::read(host_dir.join("written.txt"))
+        .map_err(|e| format!("read back from host disk: {e}"))?;
+    if on_disk != b"from the container" {
+        return Err(format!(
+            "host disk has {on_disk:?}, want b\"from the container\""
+        ));
+    }
+    Ok(())
+}
+
+/// Stand the file RPCs up on a loopback port and connect a client to it,
+/// exactly as the gateway would. Shared by every test in this file: the
+/// `WriteFile` client-streaming RPC can only be driven through a real
+/// transport, not called directly on `Files`.
+async fn serve(
+    docker: &bollard::Docker,
+    exec: PodmanExec,
+) -> Result<
+    (
+        WorkspaceIoClient<tonic::transport::Channel>,
+        tokio::task::JoinHandle<()>,
+    ),
+    String,
+> {
     let files = Arc::new(Files::new(docker.clone(), READ_CAP));
     let svc = WorkspaceSvc::new(
         Arc::new(exec),
@@ -84,19 +253,27 @@ async fn run(
     let addr = listener
         .local_addr()
         .map_err(|e| format!("local addr: {e}"))?;
-    let server = tokio::spawn(
-        tonic::transport::Server::builder()
+    let server = tokio::spawn(async move {
+        let _ = tonic::transport::Server::builder()
             .add_service(WorkspaceIoServer::new(svc))
-            .serve_with_incoming(TcpListenerStream::new(listener)),
-    );
+            .serve_with_incoming(TcpListenerStream::new(listener))
+            .await;
+    });
 
     let channel = tonic::transport::Endpoint::from_shared(format!("http://{addr}"))
         .map_err(|e| format!("endpoint: {e}"))?
         .connect_lazy();
-    let mut client = WorkspaceIoClient::new(channel);
+    Ok((WorkspaceIoClient::new(channel), server))
+}
 
+async fn run(
+    docker: &bollard::Docker,
+    exec: PodmanExec,
+    id: &str,
+    volume: &str,
+) -> Result<(), String> {
+    let (mut client, server) = serve(docker, exec).await?;
     let outcome = round_trip(&mut client, docker, id, volume).await;
-
     server.abort();
     outcome
 }

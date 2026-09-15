@@ -24,9 +24,10 @@ use tonic::{Status, Streaming};
 /// handle into; the mount-point cache is shared behind a mutex.
 pub struct Files {
     docker: Docker,
-    /// workspace id -> the volume's mount point on disk, from `podman volume
-    /// inspect`. Filled on first use and kept for the lifetime of the process;
-    /// a volume's mount point does not move while it exists.
+    /// workspace id -> the container's `/workspace` mount source on disk.
+    /// Filled on first use and kept for the lifetime of the process; neither
+    /// a volume's mount point nor a bind mount's host path moves while the
+    /// container exists.
     roots: Mutex<HashMap<String, PathBuf>>,
     read_cap: u64,
 }
@@ -50,15 +51,33 @@ impl Files {
             return Ok(p);
         }
         let name = hearth_common::workspace_container_name(workspace_id);
-        let vol = self.docker.inspect_volume(&name).await.map_err(|e| {
-            if matches!(&e, bollard::errors::Error::DockerResponseServerError { status_code, .. } if *status_code == 404)
-            {
-                Status::not_found("workspace volume not found")
-            } else {
-                Status::internal(format!("inspect volume: {e}"))
-            }
-        })?;
-        let p = PathBuf::from(vol.mountpoint);
+        // Read the container's own mount config rather than looking up a
+        // Podman volume by name: a disposable-volume workspace has one, but a
+        // persistent host-mounted workspace (HEARTH_HOST_MOUNTS) bind-mounts a
+        // real host directory instead and has no volume at all. The container
+        // is the one place that is true for either kind, and it exists for as
+        // long as the volume would have (stop leaves it in place; only
+        // Destroy removes it).
+        let info = self
+            .docker
+            .inspect_container(&name, None)
+            .await
+            .map_err(|e| {
+                if matches!(&e, bollard::errors::Error::DockerResponseServerError { status_code, .. } if *status_code == 404)
+                {
+                    Status::not_found("workspace container not found")
+                } else {
+                    Status::internal(format!("inspect container: {e}"))
+                }
+            })?;
+        let source = info
+            .mounts
+            .unwrap_or_default()
+            .into_iter()
+            .find(|m| m.destination.as_deref() == Some("/workspace"))
+            .and_then(|m| m.source)
+            .ok_or_else(|| Status::internal("workspace container has no /workspace mount"))?;
+        let p = PathBuf::from(source);
         self.roots
             .lock()
             .unwrap()
