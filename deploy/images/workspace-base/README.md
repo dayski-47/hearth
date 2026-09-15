@@ -47,7 +47,9 @@ git push origin workspace-base-v<n>
 ```
 
 The `workspace-base` workflow builds the image, scans it with Trivy, and pushes
-`ghcr.io/dayski-47/hearth-workspace-base:v<n>` and `:latest`.
+`ghcr.io/<your GitHub username or org, lowercased>/hearth-workspace-base:v<n>`
+and `:latest`. It publishes under whichever repository runs it, so a fork
+publishes to its own GHCR namespace with no workflow edits needed.
 
 The first push creates the GHCR package. A package created by the workflow's
 `GITHUB_TOKEN` is private by default, so an anonymous `docker pull` of it will

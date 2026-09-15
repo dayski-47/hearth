@@ -160,15 +160,17 @@ that already has it bind-mounted keeps access until it is destroyed.
 ## Using your own base image
 
 Every workspace starts from one OCI image, named by `HEARTH_WORKSPACE_IMAGE`
-in `.env`. A fresh `.env` sets it to
-`ghcr.io/dayski-47/hearth-workspace-base:latest`. That image is built from
-`deploy/images/workspace-base/`; its [`README.md`](../deploy/images/workspace-base/README.md)
-lists what is baked in and how new versions are cut. Publishing is tag-driven:
-pushing a `workspace-base-v*` git tag runs a workflow that builds the image,
-scans it with Trivy, and pushes it to `ghcr.io/dayski-47/hearth-workspace-base`
-as both `:v<n>` and `:latest`. A real image sits at that path only once such a
-tag has been pushed, so if you run from a fork with nothing published there,
-point `HEARTH_WORKSPACE_IMAGE` at an image you can pull.
+in `.env`. A fresh `.env` sets it to the upstream project's published image,
+`ghcr.io/dayski-47/hearth-workspace-base:latest` - fine to keep using as-is,
+even from a fork, if you have no reason to customize it. That image is built
+from `deploy/images/workspace-base/`; its
+[`README.md`](../deploy/images/workspace-base/README.md) lists what is baked
+in and how new versions are cut. Publishing is tag-driven: pushing a
+`workspace-base-v*` git tag runs a workflow that builds the image, scans it
+with Trivy, and pushes it to `ghcr.io/<your namespace>/hearth-workspace-base`
+under whichever repository ran it - so a fork's own tag push publishes to its
+own GHCR namespace with no workflow edits needed. Once that first publish
+succeeds, point `HEARTH_WORKSPACE_IMAGE` at your own image instead.
 
 The default image is deliberately large (around 2 GB): git, a C/C++ toolchain,
 Go, Rust, Node, and Python are all baked in so a workspace is usable without

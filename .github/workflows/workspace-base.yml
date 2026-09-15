@@ -17,7 +17,8 @@ jobs:
       - name: Derive the push tags
         id: tags
         run: |
-          image=ghcr.io/dayski-47/hearth-workspace-base
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/$owner/hearth-workspace-base"
           {
             echo "tags<<EOF"
             if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "${GITHUB_REF_NAME#workspace-base-v}" != "$GITHUB_REF_NAME" ]; then
