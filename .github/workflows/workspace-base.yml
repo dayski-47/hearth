@@ -37,7 +37,7 @@ jobs:
           tags: hearth-workspace-base:scan
 
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: hearth-workspace-base:scan
           format: table
