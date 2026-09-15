@@ -27,13 +27,16 @@ test("running workspace shows an Open link to its route", () => {
   );
 });
 
-test("stopped workspace shows no Open link", () => {
+test("stopped workspace still shows an Open link to its route", () => {
   render(
     <MemoryRouter future={future}>
       <WorkspaceCard ws={{ ...base, state: "stopped" }} />
     </MemoryRouter>,
   );
-  expect(screen.queryByRole("link", { name: "Open" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Open" })).toHaveAttribute(
+    "href",
+    "/w/a",
+  );
 });
 
 test("stopped workspace: Start calls the action, Destroy is present", async () => {

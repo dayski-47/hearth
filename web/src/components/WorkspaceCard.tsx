@@ -30,7 +30,12 @@ export default function WorkspaceCard({ ws }: { ws: Workspace }) {
           </>
         )}
         {ws.state === "stopped" && (
-          <button onClick={() => void start(ws.id)}>Start</button>
+          <>
+            <Link className="btn" to={`/w/${ws.id}`}>
+              Open
+            </Link>
+            <button onClick={() => void start(ws.id)}>Start</button>
+          </>
         )}
         {ws.state === "error" && (
           <button onClick={() => void start(ws.id)}>Start</button>
