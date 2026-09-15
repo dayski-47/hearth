@@ -32,7 +32,11 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g npm@latest \
- && npm --prefix "$(npm root -g)/npm" install tar@latest \
+ && tar_tmp=$(mktemp -d) \
+ && npm install --prefix "$tar_tmp" tar@latest \
+ && rm -rf "$(npm root -g)/npm/node_modules/tar" \
+ && mv "$tar_tmp/node_modules/tar" "$(npm root -g)/npm/node_modules/tar" \
+ && rm -rf "$tar_tmp" \
  && node --version && npm --version
 
 # A non-root default user; the workspace volume mounts at /workspace.
