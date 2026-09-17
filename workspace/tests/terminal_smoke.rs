@@ -192,11 +192,20 @@ async fn idle_terminal_tears_down_on_drop() {
         // The client goes away without ever touching stdin or reading stdout.
         drop(handle);
 
-        // Both exec halves are gone now, so the shell can be reaped and the
-        // container removed without waiting on a dead connection. 10s to
-        // match the other Podman round-trip timeouts in this file - a loaded
-        // CI runner's force-remove (kill + cgroup/netns teardown) can take
-        // longer than a quiet dev box.
+        // Stop before force-removing: a container that still has a live exec
+        // session attached (this just-abandoned terminal) can make a plain
+        // force-remove hang on some Podman versions - confirmed against a real
+        // CI runner, not a guess. A normal stop (SIGTERM, wait, SIGKILL) reaps
+        // the exec session first through Podman's own well-trodden path, same
+        // fix as agent::lifecycle::Lifecycle::destroy.
+        timeout(
+            Duration::from_secs(15),
+            exec.docker().stop_container(&name, None),
+        )
+        .await
+        .map_err(|_| "stop_container hung after dropping an idle terminal".to_string())?
+        .map_err(|e| format!("stop container: {e}"))?;
+
         timeout(
             Duration::from_secs(10),
             exec.docker().remove_container(
