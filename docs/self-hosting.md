@@ -81,13 +81,15 @@ existing `.env`; re-run with `just setup --force` if you need to start over.
 
 `docker compose ... up -d` starts Postgres, the gateway, and Caddy.
 `just install-services` builds the release binaries, renders the systemd unit
-files with your repo path, and enables `hearth-agent` and `hearth-workspace`.
+files with your repo path, and enables `hearth-agent`, `hearth-workspace`, and
+`hearth-compose` - the last one re-runs `docker compose up -d` on every boot,
+so a restart brings the whole stack back with no manual step.
 
 Then open `https://<your-domain>` (or `https://localhost`) and log in with the
 admin credential you set during setup. Check the host services with:
 
 ```
-systemctl --user status hearth-agent hearth-workspace
+systemctl --user status hearth-compose hearth-agent hearth-workspace
 ```
 
 ## Changing workspace limits
@@ -219,6 +221,55 @@ network at all. The trade-off is that nothing inside a workspace can reach the
 internet: no `git clone`, no package installs, no outbound API calls. Use this
 when a workspace should only ever touch code you put in its volume yourself.
 
+## Tailscale HTTPS
+
+If you reach your host over [Tailscale](https://tailscale.com) rather than a
+public domain, `HEARTH_DOMAIN=localhost`'s self-signed cert means every
+client sees a browser warning - fine for you alone, not great if you're
+showing the app to anyone else on your tailnet. Tailscale can issue a real,
+publicly-trusted cert for your MagicDNS name (Settings > enable **HTTPS
+Certificates** on your tailnet first), and Caddy can serve it instead,
+without touching `HEARTH_DOMAIN` or anything every self-hoster shares:
+
+```
+sudo deploy/certs/tailscale-cert.sh
+```
+
+This writes `deploy/certs/tailscale/<your-magicdns-name>.crt`/`.key` (needs
+`sudo`: `tailscale cert` reads the daemon's own state) and reloads Caddy if
+it's already running. Then drop a site block into
+`deploy/caddy-sites.d/<anything>.caddy` - that directory is gitignored and
+globbed into the main Caddyfile, so it's never shared with anyone else who
+runs this repo:
+
+```
+your-device.your-tailnet.ts.net {
+	tls /certs/tailscale/your-device.your-tailnet.ts.net.crt /certs/tailscale/your-device.your-tailnet.ts.net.key
+	import app
+}
+```
+
+`docker compose -f deploy/docker-compose.yml up -d --force-recreate caddy`
+picks up the new file. If you want browser access (not just the page load) to
+work at that hostname - terminal, file tree, live events all go over
+WebSocket - also point `HEARTH_PUBLIC_URL` and `HEARTH_ALLOWED_ORIGIN` in
+`.env` at `https://your-device.your-tailnet.ts.net` and recreate the gateway
+container the same way; the gateway only accepts one origin, so this trades
+away plain `https://localhost` access for the trusted-cert one.
+
+Tailscale's certs are short-lived (about 90 days) and `tailscale-cert.sh`
+doesn't renew itself - install `deploy/systemd/hearth-tailscale-cert.service.tmpl`
++ `.timer` as system units (they need root, unlike the other three services)
+to keep it current automatically:
+
+```
+sed "s#@REPO@#$(pwd)#g" deploy/systemd/hearth-tailscale-cert.service.tmpl \
+  | sudo tee /etc/systemd/system/hearth-tailscale-cert.service >/dev/null
+sudo cp deploy/systemd/hearth-tailscale-cert.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hearth-tailscale-cert.timer
+```
+
 ## A second host
 
 Multi-host scheduling is post-v1. The registry seam exists: hosts register with
@@ -245,7 +296,7 @@ just uninstall-services
 docker compose -f deploy/docker-compose.yml down -v
 ```
 
-`just uninstall-services` disables and removes the two systemd units.
+`just uninstall-services` disables and removes the three systemd units.
 `down -v` stops the containers and deletes their volumes, including the Postgres
 database and Caddy's certificate cache; on a real domain the next `up` re-fetches
 certificates from Let's Encrypt, so repeated teardowns can run into its rate
