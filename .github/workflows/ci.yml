@@ -42,7 +42,11 @@ jobs:
       - run: cargo install cargo-deny --locked --version 0.20.2
       - run: cargo deny check
       - run: cargo install cargo-audit --locked --version 0.22.2
-      - run: cargo audit
+      # cargo-deny and cargo-audit both default to ~/.cargo/advisory-db for
+      # their RustSec clone; cargo-deny's clone there trips cargo-audit's own
+      # fetch (it refuses to touch a non-empty dir it didn't create itself).
+      # Give it a separate path.
+      - run: cargo audit --db /tmp/rustsec-advisory-db
   proto:
     runs-on: ubuntu-latest
     steps:
