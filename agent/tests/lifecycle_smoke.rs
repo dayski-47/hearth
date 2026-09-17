@@ -109,6 +109,13 @@ async fn create_get_stop_destroy_busybox() {
         "security_opt = {:?}, want no-new-privileges",
         hc.security_opt
     );
+    // Runs as the actual host user, not whatever UID the image hardcodes -
+    // keep-id only pins that number into the namespace, it does not change
+    // which UID the process runs as (a real bug this caught: the base image
+    // hardcodes UID 1000, which silently only worked by accident on a host
+    // where the self-hoster's own UID also happened to be 1000).
+    let user = info.config.and_then(|c| c.user).unwrap_or_default();
+    assert_eq!(user, hearth_common::host_uid().to_string());
     // No live ulimit assertion: Podman 4.3.1's Docker-compat create endpoint
     // silently discards HostConfig.Ulimits (its own --ulimit flag honours it,
     // the API does not), so the nofile limit we ask for never reaches the

@@ -231,6 +231,11 @@ impl ContainerEngine for PodmanEngine {
             image: Some(spec.image.clone()),
             cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
             labels: Some(labels),
+            // Run as the self-hosting user, not whatever UID the image
+            // happens to hardcode - keep-id only pins that specific number
+            // into the container's namespace, it does not change which UID
+            // the process runs as. See hearth_common::host_uid.
+            user: Some(hearth_common::host_uid().to_string()),
             host_config: Some(workspace_host_config(&spec)),
             ..Default::default()
         };

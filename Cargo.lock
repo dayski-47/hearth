@@ -515,6 +515,9 @@ dependencies = [
 [[package]]
 name = "hearth-common"
 version = "0.0.0"
+dependencies = [
+ "rustix",
+]
 
 [[package]]
 name = "hearth-proto"
