@@ -18,3 +18,9 @@
 	}
 	import app
 }
+
+# Per-instance site blocks (e.g. a Tailscale HTTPS hostname with its own
+# real cert) that don't belong in a file every self-hoster shares - see
+# "Tailscale HTTPS" in docs/self-hosting.md. Empty by default; a glob
+# import of a directory with nothing in it is a no-op.
+import /etc/caddy/sites.d/*.caddy

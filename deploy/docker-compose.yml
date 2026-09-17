@@ -64,6 +64,8 @@ services:
     env_file: ../.env
     volumes:
       - ../deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../deploy/caddy-sites.d:/etc/caddy/sites.d:ro
+      - ../deploy/certs/tailscale:/certs/tailscale:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [gateway]
