@@ -81,12 +81,17 @@ async fn create_get_stop_destroy_busybox() {
     );
     let dropped = hc.cap_drop.clone().unwrap_or_default();
     let dropped_all = dropped.iter().any(|c| c.eq_ignore_ascii_case("ALL"));
+    // MKNOD and NET_RAW deliberately excluded: rootless Podman under a user
+    // namespace often has neither in a fresh container's default capability
+    // bounding set to begin with, so a runtime can echo back a CapDrop list
+    // that never mentions them without our "cap_drop: ALL" request having
+    // done anything different - not a signal either way for those two. The
+    // rest are reliably present across Podman/runc/crun versions and are the
+    // ones that actually matter (privilege escalation, ownership bypass).
     for want in [
         "CHOWN",
         "DAC_OVERRIDE",
         "FOWNER",
-        "MKNOD",
-        "NET_RAW",
         "SETGID",
         "SETPCAP",
         "SETUID",
