@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the Tailscale HTTPS cert Caddy serves for Hearth
+After=network-online.target tailscaled.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/deploy/certs/tailscale-cert.sh

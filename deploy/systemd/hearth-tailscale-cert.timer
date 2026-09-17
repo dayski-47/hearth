@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic renewal of the Tailscale HTTPS cert for Hearth
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
