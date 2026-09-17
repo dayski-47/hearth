@@ -193,9 +193,12 @@ async fn idle_terminal_tears_down_on_drop() {
         drop(handle);
 
         // Both exec halves are gone now, so the shell can be reaped and the
-        // container removed without waiting on a dead connection.
+        // container removed without waiting on a dead connection. 10s to
+        // match the other Podman round-trip timeouts in this file - a loaded
+        // CI runner's force-remove (kill + cgroup/netns teardown) can take
+        // longer than a quiet dev box.
         timeout(
-            Duration::from_secs(3),
+            Duration::from_secs(10),
             exec.docker().remove_container(
                 &name,
                 Some(RemoveContainerOptions {
