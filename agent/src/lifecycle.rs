@@ -119,10 +119,19 @@ impl<E: ContainerEngine> Lifecycle<E> {
     }
 
     pub async fn destroy(&self, id: &str) -> Result<()> {
-        self.engine.remove(&workspace_container_name(id)).await?;
-        self.engine
-            .remove_volume(&workspace_container_name(id))
-            .await?;
+        let name = workspace_container_name(id);
+        // Stop before force-removing: a container that still has a live exec
+        // session attached (a just-abandoned terminal) can make a force-remove
+        // hang on some Podman versions. A normal stop (SIGTERM, wait, SIGKILL)
+        // reaps that first through Podman's own well-trodden path, so the
+        // remove that follows is always against an already-stopped container.
+        // Best-effort: a container that was never running, or already gone,
+        // must not block teardown - remove()'s own 404 handling covers that.
+        if let Err(e) = self.engine.stop(&name).await {
+            tracing::warn!(workspace_id = %id, error = %e, "stop before destroy failed, removing anyway");
+        }
+        self.engine.remove(&name).await?;
+        self.engine.remove_volume(&name).await?;
         tracing::info!(workspace_id = %id, "workspace destroyed");
         Ok(())
     }
@@ -273,12 +282,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn destroy_removes_container_then_volume() {
+    async fn destroy_stops_then_removes_container_then_volume() {
         let eng = Arc::new(FakeEngine::new(ContainerRunState::Stopped));
         let lc = new(eng.clone(), "h1".into(), Vec::new());
         lc.destroy("w1").await.unwrap();
         let calls = eng.calls.lock().unwrap().clone();
-        assert_eq!(calls, ["remove", "remove_volume"]);
+        assert_eq!(calls, ["stop", "remove", "remove_volume"]);
+    }
+
+    #[tokio::test]
+    async fn destroy_still_removes_when_stop_fails() {
+        // A container that never came up (or is already gone) must not block
+        // teardown just because there was nothing to stop.
+        let eng = Arc::new(FakeEngine {
+            fail: Some("stop"),
+            ..FakeEngine::new(ContainerRunState::Missing)
+        });
+        let lc = new(eng.clone(), "h1".into(), Vec::new());
+        lc.destroy("w1").await.unwrap();
+        let calls = eng.calls.lock().unwrap().clone();
+        assert_eq!(calls, ["stop", "remove", "remove_volume"]);
     }
 
     #[tokio::test]
