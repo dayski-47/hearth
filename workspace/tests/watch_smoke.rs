@@ -8,6 +8,8 @@
 
 use std::time::Duration;
 
+use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions};
+use bollard::models::{HostConfig, Mount, MountTypeEnum};
 use bollard::volume::{CreateVolumeOptions, RemoveVolumeOptions};
 use futures_util::StreamExt;
 use hearth_proto::hearth::v1::file_event::Kind;
@@ -27,11 +29,22 @@ async fn watch_reports_volume_changes() {
     let exec = PodmanExec::connect(socket.as_deref()).expect("connect to podman");
     let docker = exec.docker().clone();
 
-    // `workspace_container_name(id)` == `hearth-ws-<id>`, and Files looks the
-    // volume up under that name, so the id and the volume name line up.
+    // `workspace_container_name(id)` == `hearth-ws-<id>`, and `Files::root`
+    // resolves the container's own `/workspace` mount (not the volume
+    // directly - see files.rs), so both the volume and a container mounting
+    // it must exist here even though the container is never started.
     let id = format!("wsmoke{}", std::process::id());
     let volume = format!("hearth-ws-{id}");
 
+    let _ = docker
+        .remove_container(
+            &volume,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
     let _ = docker
         .remove_volume(&volume, Some(RemoveVolumeOptions { force: true }))
         .await;
@@ -42,9 +55,40 @@ async fn watch_reports_volume_changes() {
         })
         .await
         .expect("create volume");
+    docker
+        .create_container(
+            Some(CreateContainerOptions {
+                name: volume.clone(),
+                platform: None,
+            }),
+            Config {
+                image: Some("docker.io/library/busybox:stable".to_string()),
+                host_config: Some(HostConfig {
+                    mounts: Some(vec![Mount {
+                        target: Some("/workspace".to_string()),
+                        source: Some(volume.clone()),
+                        typ: Some(MountTypeEnum::VOLUME),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create container with a volume mount");
 
     let result = run(&docker, &id, &volume).await;
 
+    let _ = docker
+        .remove_container(
+            &volume,
+            Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await;
     let _ = docker
         .remove_volume(&volume, Some(RemoveVolumeOptions { force: true }))
         .await;
