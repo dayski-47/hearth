@@ -1,0 +1,17 @@
+[Unit]
+Description=Hearth compose stack (postgres, gateway, caddy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# docker.service is a system unit; a --user unit can't depend on it directly
+# (different systemd manager scope), so wait for the socket instead of
+# ordering against it.
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@REPO@
+ExecStart=/bin/sh -c 'i=0; until docker info >/dev/null 2>&1 || [ $i -ge 30 ]; do i=$((i+1)); sleep 1; done; docker compose -f @REPO@/deploy/docker-compose.yml up -d'
+ExecStop=docker compose -f @REPO@/deploy/docker-compose.yml down
+
+[Install]
+WantedBy=default.target
