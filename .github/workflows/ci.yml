@@ -108,6 +108,11 @@ jobs:
             sleep 0.5
           done
           echo "HEARTH_PODMAN_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock" >> "$GITHUB_ENV"
+          # The gated Rust smokes need these already pulled - a fresh runner
+          # has neither, and the tests assume the image exists rather than
+          # pulling it themselves.
+          podman pull docker.io/library/busybox:latest
+          podman pull docker.io/library/busybox:stable
 
       - name: Codegen + build the data plane
         run: |
