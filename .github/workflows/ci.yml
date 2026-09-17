@@ -101,10 +101,14 @@ jobs:
 
       - name: Install just
         # The Web golden path step below drives setup/install-services/
-        # uninstall-services through it; nothing on ubuntu-latest provides it.
+        # uninstall-services through it; nothing on ubuntu-latest provides
+        # it. Pinned direct download from GitHub Releases, like every other
+        # tool this workflow installs - just.systems/install.sh's own CDN
+        # 403'd a CI runner once, unrelated to anything in this repo.
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
-            | bash -s -- --to "$HOME/.local/bin"
+          mkdir -p "$HOME/.local/bin"
+          curl -sL https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz -C "$HOME/.local/bin" just
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Start a Podman service
