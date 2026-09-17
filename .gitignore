@@ -12,5 +12,7 @@
 !.env.example
 /deploy/certs/*.pem
 /deploy/certs/*.srl
+/deploy/certs/tailscale/
+/deploy/caddy-sites.d/
 /bin/
 /.superpowers/
